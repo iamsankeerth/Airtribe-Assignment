@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draftly - AI-Powered Gmail Assistant & Writing Style Copilot</title>
+  <meta name="description" content="Draftly automates Gmail replies, analyzes your historical writing style, and suggests contextual drafts with custom tones under your full approval.">
+  
+  <!-- Modern Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Premium Stylesheets -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Dynamic Background Mesh -->
+  <div class="mesh-background">
+    <div class="mesh-orb orb-1"></div>
+    <div class="mesh-orb orb-2"></div>
+    <div class="mesh-orb orb-3"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- 1. TOP HEADER -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+        </div>
+        <div class="logo-text">
+          <h1>Draftly</h1>
+          <span>Gmail AI Copilot</span>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <div class="mode-badge" id="systemModeBadge">
+          <span class="pulse-indicator status-sandbox"></span>
+          <span class="badge-text">Sandbox Mode</span>
+        </div>
+
+        <button class="btn btn-primary" id="syncInboxBtn">
+          <i class="fa-solid fa-rotate"></i>
+          <span>Sync Inbox</span>
+        </button>
+
+        <nav class="nav-tabs">
+          <button class="nav-tab active" data-tab="inbox" id="tab-inbox">
+            <i class="fa-solid fa-inbox"></i> Inbox
+          </button>
+          <button class="nav-tab" data-tab="settings" id="tab-settings">
+            <i class="fa-solid fa-sliders"></i> Settings
+          </button>
+          <button class="nav-tab" data-tab="logs" id="tab-logs">
+            <i class="fa-solid fa-receipt"></i> Audit Logs
+          </button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Global Alerts Section -->
+    <div id="connectionAlert" class="alert-banner hidden">
+      <div class="alert-content">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div class="alert-text">
+          <strong>Action Required:</strong> OAuth2 session has expired. Please reconnect your Google account in Settings.
+        </div>
+      </div>
+      <button class="alert-close" onclick="this.parentElement.classList.add('hidden')">&times;</button>
+    </div>
+
+    <!-- 2. MAIN APPLICATION CONTENT -->
+    <main class="app-content">
+      
+      <!-- ================= INBOX VIEW (DEFAULT) ================= -->
+      <section class="tab-content active" id="view-inbox">
+        <div class="inbox-layout">
+          
+          <!-- LEFT: EMAIL LIST -->
+          <div class="pane email-list-pane">
+            <div class="pane-header">
+              <h2>Recent Emails</h2>
+              <span class="count-badge" id="emailCount">0</span>
+            </div>
+            <div class="email-list" id="emailListContainer">
+              <!-- Loading Skeleton -->
+              <div class="list-skeleton">
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+                <div class="skeleton-item"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- MIDDLE: SPLIT WORKSPACE (EMAIL THREAD & AI DRAFT) -->
+          <div class="pane workspace-pane">
+            
+            <!-- Email Detail Area (Top) -->
+            <div class="workspace-section email-detail-section" id="workspaceEmailDetail">
+              <div class="empty-workspace-state">
+                <i class="fa-solid fa-envelope-open-text"></i>
+                <h3>No Email Selected</h3>
+                <p>Select an email from the inbox list to generate and manage draft replies.</p>
+              </div>
+            </div>
+
+            <!-- AI Draft Editor Area (Bottom) -->
+            <div class="workspace-section draft-section hidden" id="workspaceDraftEditor">
+              <div class="draft-card">
+                <div class="draft-header">
+                  <div class="draft-title">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <h3>AI Suggestion</h3>
+                  </div>
+                  
+                  <!-- Tone Selector Chips -->
+                  <div class="tone-selector">
+                    <span class="selector-label">Tone:</span>
+                    <div class="tone-chips" id="toneChipsContainer">
+                      <button class="tone-chip active" data-tone="Concise">Concise</button>
+                      <button class="tone-chip" data-tone="Friendly">Friendly</button>
+                      <button class="tone-chip" data-tone="Formal">Formal</button>
+                      <button class="tone-chip" data-tone="Custom">Custom</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="draft-editor-container">
+                  <!-- Text Area for Editing -->
+                  <textarea id="draftTextArea" class="draft-textarea" placeholder="AI generating draft..."></textarea>
+                  
+                  <!-- Draft Status & Progress -->
+                  <div class="draft-status-bar">
+                    <div class="draft-status-info">
+                      <span class="status-indicator-tag" id="draftStatusBadge">Suggested</span>
+                      <span class="draft-timestamp" id="draftTimestamp">Generated just now</span>
+                    </div>
+                    <div class="queue-retry-status hidden" id="retryStatusText">
+                      <i class="fa-solid fa-arrows-spin fa-spin"></i> Queued for retry...
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Draft Actions -->
+                <div class="draft-actions">
+                  <button class="btn btn-secondary" id="rejectDraftBtn">
+                    <i class="fa-solid fa-trash-can"></i>
+                    <span>Discard Draft</span>
+                  </button>
+                  
+                  <div class="actions-right">
+                    <button class="btn btn-secondary" id="saveDraftBtn">
+                      <i class="fa-solid fa-floppy-disk"></i>
+                      <span>Save Edits</span>
+                    </button>
+                    <button class="btn btn-accent btn-glow" id="approveSendBtn">
+                      <i class="fa-solid fa-paper-plane"></i>
+                      <span>Approve & Send</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+
+          <!-- RIGHT: SYSTEM WIDGETS (STATS & WRITING PROFILE) -->
+          <div class="pane widgets-pane">
+            
+            <!-- Statistics Widget -->
+            <div class="widget-card stats-card">
+              <div class="widget-header">
+                <i class="fa-solid fa-chart-line text-cyan"></i>
+                <h3>Copilot Efficiency</h3>
+              </div>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-value" id="statProcessed">0</span>
+                  <span class="stat-label">Fetched</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value text-emerald" id="statSent">0</span>
+                  <span class="stat-label">Dispatched</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-value text-purple" id="statSuccess">100%</span>
+                  <span class="stat-label">Success Rate</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Style Copilot Widget -->
+            <div class="widget-card style-card">
+              <div class="widget-header">
+                <i class="fa-solid fa-brain text-purple"></i>
+                <h3>Linguistic Copilot</h3>
+              </div>
+              
+              <div class="style-profile-view" id="styleProfileContainer">
+                <p class="profile-summary" id="profileSummaryText">
+                  No writing style profile has been extracted yet. Connect your email to analyze sent history.
+                </p>
+                
+                <div class="style-metrics" id="styleMetricsGrid">
+                  <!-- Dynamically populated style characteristics -->
+                </div>
+
+                <div class="learning-progress-bar hidden" id="learningProgress">
+                  <div class="progress-track">
+                    <div class="progress-fill" id="progressFillBar"></div>
+                  </div>
+                  <span id="progressText">Analyzing outbox patterns...</span>
+                </div>
+
+                <button class="btn btn-secondary btn-full" id="learnStyleBtn">
+                  <i class="fa-solid fa-graduation-cap"></i>
+                  <span>Analyze Sent Emails</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+
+      <!-- ================= SETTINGS VIEW ================= -->
+      <section class="tab-content" id="view-settings">
+        <div class="settings-layout">
+          
+          <div class="settings-card">
+            <h2>System Configurations</h2>
+            <p class="card-subtitle">Manage sandbox sandboxes, API modes, and encryption options.</p>
+
+            <form id="settingsForm" class="settings-form">
+              <!-- Mode Selector -->
+              <div class="form-group">
+                <label>System Mode</label>
+                <div class="mode-toggle-group">
+                  <label class="toggle-card">
+                    <input type="radio" name="systemMode" value="Sandbox" checked>
+                    <div class="toggle-card-content">
+                      <i class="fa-solid fa-flask"></i>
+                      <div class="toggle-info">
+                        <h4>Sandbox Mode (Recommended)</h4>
+                        <p>Simulate Gmail and LLM functionality instantly with zero credentials.</p>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="toggle-card">
+                    <input type="radio" name="systemMode" value="Live">
+                    <div class="toggle-card-content">
+                      <i class="fa-solid fa-bolt text-glow"></i>
+                      <div class="toggle-info">
+                        <h4>Live Production Mode</h4>
+                        <p>Authenticate with your actual Google Account and use real Gemini API.</p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Live Configuration Section -->
+              <div class="settings-section-divider" id="liveSettingsHeader">
+                <h3>Live Integrations (Google Cloud & Gemini)</h3>
+                <p>Ensure these values are accurate to enable full Live operations.</p>
+              </div>
+
+              <div class="settings-grid-fields" id="liveSettingsFields">
+                <div class="form-group">
+                  <label for="clientId">Google OAuth2 Client ID</label>
+                  <input type="text" id="clientId" placeholder="enter Google Client ID...">
+                  <span class="field-hint">Generate in <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a>. Redirect URI: <code>http://localhost:5000/api/auth/callback</code></span>
+                </div>
+
+                <div class="form-group">
+                  <label for="clientSecret">Google OAuth2 Client Secret</label>
+                  <input type="password" id="clientSecret" placeholder="enter Google Client Secret...">
+                </div>
+
+                <div class="form-group form-fullwidth">
+                  <label for="geminiApiKey">Google Gemini API Key</label>
+                  <input type="password" id="geminiApiKey" placeholder="enter Gemini API Key...">
+                  <span class="field-hint">Get an API key from <a href="https://aistudio.google.com" target="_blank">Google AI Studio</a> to power Live drafts.</span>
+                </div>
+              </div>
+
+              <!-- Save Buttons -->
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="saveConfigBtn">
+                  <i class="fa-solid fa-floppy-disk"></i> Save Configurations
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- OAuth Card -->
+          <div class="settings-card connection-card" id="oauthCard">
+            <h2>Gmail Account Connection</h2>
+            <p class="card-subtitle">Authorize Draftly to securely manage your inbox drafts.</p>
+
+            <div class="connection-status-panel">
+              <div class="status-indicator">
+                <div class="status-glow-icon disconnected" id="connectionGlow">
+                  <i class="fa-solid fa-plug"></i>
+                </div>
+                <div class="status-details">
+                  <h3 id="connectionStatusTitle">Disconnected</h3>
+                  <p id="connectionStatusDesc">Connect your Google account using secure OAuth2 protocol.</p>
+                </div>
+              </div>
+
+              <div class="oauth-actions">
+                <button class="btn btn-accent btn-glow" id="connectGmailBtn">
+                  <i class="fa-brands fa-google"></i> Connect Gmail Account
+                </button>
+                <button class="btn btn-secondary hidden" id="disconnectGmailBtn">
+                  <i class="fa-solid fa-arrow-right-from-bracket"></i> Disconnect Account
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Preferences Card -->
+          <div class="settings-card">
+            <h2>Writing Preferences</h2>
+            <p class="card-subtitle">Instruct the AI generator on default layout structures and custom formatting.</p>
+
+            <form id="preferencesForm" class="settings-form">
+              <div class="form-group">
+                <label for="defaultTone">Default Draft Tone</label>
+                <select id="defaultTone" class="form-select">
+                  <option value="Concise">Concise (Direct, fast, summary-driven)</option>
+                  <option value="Friendly">Friendly (Warm, casual, relational)</option>
+                  <option value="Formal">Formal (Professional, detailed, thorough)</option>
+                  <option value="Custom">Custom / Empathetic (Empathetic, urgent, or dynamic)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="customInstructions">Custom AI Writing Guidelines</label>
+                <textarea id="customInstructions" class="form-textarea" placeholder="e.g. Always address them by their first name, explain our SLA schedules, write in a modern SaaS voice..."></textarea>
+              </div>
+
+              <div class="form-group">
+                <label for="signature">Email Signature</label>
+                <input type="text" id="signature" placeholder="e.g. Best regards, Demo User | CEO, SaaS Corp">
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="savePreferencesBtn">
+                  <i class="fa-solid fa-check"></i> Save Writing Preferences
+                </button>
+              </div>
+            </form>
+          </div>
+
+        </div>
+      </section>
+
+
+      <!-- ================= AUDIT LOGS VIEW ================= -->
+      <section class="tab-content" id="view-logs">
+        <div class="logs-layout">
+          <div class="logs-card">
+            <div class="logs-header">
+              <div class="logs-title">
+                <h2>Real-Time Activity Audit Trail</h2>
+                <p class="card-subtitle">Examine direct server events, AI prompts, OAuth calls, queue processing, and error diagnostics.</p>
+              </div>
+              <button class="btn btn-secondary" id="clearLogsBtn">
+                <i class="fa-solid fa-arrows-rotate"></i> Refresh Logs
+              </button>
+            </div>
+            
+            <div class="logs-table-container">
+              <table class="logs-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Category</th>
+                    <th>Severity</th>
+                    <th>Message Log</th>
+                  </tr>
+                </thead>
+                <tbody id="logsTableBody">
+                  <!-- Log entries dynamically streamed -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Real-time Event Log Notification Area (Floating toast element) -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Load client application logic -->
+  <script src="js/app.js"></script>
+</body>
+</html>
