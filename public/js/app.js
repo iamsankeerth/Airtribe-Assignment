@@ -256,6 +256,7 @@ function renderEmailList() {
 
   if (STATE.emails.length === 0) {
     container.innerHTML = '<div class="empty-workspace-state"><h3>Inbox Empty</h3><p>Sync your inbox to fetch messages.</p></div>';
+    renderEmptyWorkspace();
     return;
   }
 
@@ -357,6 +358,9 @@ async function renderDraftArea(emailId) {
     
     try {
       const res = await fetch(`/api/drafts/${emailId}`);
+      if (!res.ok) {
+        throw new Error('Draft not found or generation failed');
+      }
       draft = await res.json();
       
       // Fetch newest drafts state
