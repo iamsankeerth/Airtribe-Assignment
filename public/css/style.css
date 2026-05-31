@@ -11,23 +11,23 @@
   --bg-tertiary: rgba(22, 30, 48, 0.5);
   
   --border-color: rgba(255, 255, 255, 0.08);
-  --border-glow: rgba(245, 166, 35, 0.15);
+  --border-glow: rgba(37, 99, 235, 0.15);
   
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #64748b;
   
-  /* Glowing Premium Accents (Slate & Burnished Copper) */
-  --primary: #f5a623;
-  --primary-glow: rgba(245, 166, 35, 0.35);
-  --accent: #f05a28;
-  --accent-glow: rgba(240, 90, 40, 0.25);
+  /* Glowing Premium Accents (Slate & Sapphire Blue) */
+  --primary: #2563eb;
+  --primary-glow: rgba(37, 99, 235, 0.35);
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.25);
   
   /* Severity Colors */
   --success: #10b981;
   --success-glow: rgba(16, 185, 129, 0.2);
-  --warning: #f59e0b;
-  --warning-glow: rgba(245, 158, 11, 0.2);
+  --warning: #6366f1;
+  --warning-glow: rgba(99, 102, 241, 0.2);
   --danger: #ef4444;
   --danger-glow: rgba(239, 68, 68, 0.2);
   --info: #06b6d4;
@@ -210,13 +210,13 @@ body {
 
 .status-sandbox {
   background-color: var(--warning);
-  box-shadow: 0 0 8px var(--warning);
+  box-shadow: none;
   animation: pulse 1.5s infinite;
 }
 
 .status-live {
   background-color: var(--success);
-  box-shadow: 0 0 8px var(--success);
+  box-shadow: none;
   animation: pulse 1.5s infinite;
 }
 
@@ -259,8 +259,8 @@ body {
 .nav-tab.active {
   background: var(--bg-tertiary);
   color: var(--primary);
-  border: 1px solid rgba(157, 78, 221, 0.25);
-  box-shadow: inset 0 0 8px rgba(157, 78, 221, 0.05);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  box-shadow: none;
 }
 
 /* ==========================================================================
@@ -355,9 +355,9 @@ body {
 }
 
 .email-item.selected {
-  background: rgba(157, 78, 221, 0.06);
-  border-color: rgba(157, 78, 221, 0.3);
-  box-shadow: inset 0 0 10px rgba(157, 78, 221, 0.05);
+  background: rgba(37, 99, 235, 0.06);
+  border-color: rgba(37, 99, 235, 0.3);
+  box-shadow: none;
 }
 
 .email-item.selected::before {
@@ -422,7 +422,7 @@ body {
   background-color: var(--accent);
   border-radius: 50%;
   display: inline-block;
-  box-shadow: 0 0 6px var(--accent);
+  box-shadow: none;
 }
 
 /* Middle Workspace: Split Panels */
@@ -608,7 +608,7 @@ body {
 .tone-chip.active {
   background: var(--primary);
   color: #fff;
-  box-shadow: 0 0 8px var(--primary-glow);
+  box-shadow: none;
 }
 
 /* Editor text area */
@@ -637,8 +637,8 @@ body {
 }
 
 .draft-textarea:focus {
-  border-color: rgba(157, 78, 221, 0.4);
-  box-shadow: 0 0 10px rgba(157, 78, 221, 0.1);
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: none;
 }
 
 /* Skeleton Loading Overlay */
@@ -1020,8 +1020,8 @@ body {
 /* Radio button Checked styles */
 .toggle-card input[type="radio"]:checked + .toggle-card-content {
   border-color: var(--primary);
-  background: rgba(157, 78, 221, 0.05);
-  box-shadow: 0 0 15px rgba(157, 78, 221, 0.15);
+  background: rgba(37, 99, 235, 0.05);
+  box-shadow: none;
 }
 
 .toggle-card input[type="radio"]:checked + .toggle-card-content i {
@@ -1078,7 +1078,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 8px rgba(157, 78, 221, 0.15);
+  box-shadow: none;
 }
 
 .field-hint {
@@ -1133,14 +1133,14 @@ textarea:focus {
   background: rgba(239, 68, 68, 0.05);
   border-color: rgba(239, 68, 68, 0.2);
   color: var(--danger);
-  box-shadow: 0 0 10px rgba(239, 68, 68, 0.05);
+  box-shadow: none;
 }
 
 .status-glow-icon.connected {
   background: rgba(16, 185, 129, 0.05);
   border-color: rgba(16, 185, 129, 0.2);
   color: var(--success);
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+  box-shadow: none;
 }
 
 .status-details h3 {
@@ -1315,14 +1315,14 @@ textarea:focus {
 
 .btn-primary {
   background: var(--primary);
-  color: #000;
+  color: #fff;
   font-weight: 700;
   border-color: transparent;
   box-shadow: none;
 }
 
 .btn-primary:hover {
-  background: #e09516;
+  background: #1d4ed8;
   box-shadow: none;
 }
 
@@ -1334,7 +1334,7 @@ textarea:focus {
 }
 
 .btn-accent:hover {
-  background: #d94a1b;
+  background: #2563eb;
 }
 
 .btn-glow {
@@ -1342,7 +1342,7 @@ textarea:focus {
 }
 
 .btn-glow:hover {
-  box-shadow: 0 0 25px var(--accent);
+  box-shadow: none;
 }
 
 .btn-secondary {
