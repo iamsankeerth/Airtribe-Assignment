@@ -36,13 +36,13 @@ router.get('/config', (req, res) => {
 
 router.post('/config', async (req, res) => {
   try {
-    const { mode, clientId, clientSecret, geminiApiKey } = req.body;
+    const { clientId, clientSecret, geminiApiKey } = req.body;
     const creds = db.get('credentials');
     
     // Log configuration changes
-    await db.log('System', 'Info', `Updating system configuration. Mode set to: ${mode}`);
+    await db.log('System', 'Info', 'Updating system configuration.');
 
-    creds.mode = mode || 'Sandbox';
+    creds.mode = 'Live'; // Permanently locked in Live Mode
     
     if (clientId !== undefined && !clientId.startsWith('...')) {
       creds.clientId = clientId;
@@ -52,25 +52,6 @@ router.post('/config', async (req, res) => {
     }
     if (geminiApiKey !== undefined && geminiApiKey !== '********') {
       creds.geminiApiKey = geminiApiKey;
-    }
-
-    // If switching modes, let's reset connection state to require OAuth login and clear/repopulate emails
-    if (mode !== db.get('credentials').mode) {
-      creds.isConnected = false;
-      creds.accessToken = '';
-      creds.refreshToken = '';
-      creds.tokenExpiry = 0;
-      
-      if (mode === 'Live') {
-        db.set('emails', []);
-        db.set('drafts', []);
-        await db.log('System', 'Info', 'Switched to Live Mode. Cleared all mock/sandbox emails and drafts.');
-      } else if (mode === 'Sandbox') {
-        // Completely clear emails and drafts; no more mock data under any mode
-        db.set('emails', []);
-        db.set('drafts', []);
-        await db.log('System', 'Info', 'Switched to Sandbox Mode. Cleared all emails and drafts.');
-      }
     }
 
     await db.saveEncryptedCredentials(creds);
@@ -128,7 +109,16 @@ router.post('/auth/logout', async (req, res) => {
 // ----------------------------------------------------
 
 // Fetch all fetched inbox emails
-router.get('/emails', (req, res) => {
+// Fetch all fetched inbox emails (automatically sync in Live Mode on GET)
+router.get('/emails', async (req, res) => {
+  try {
+    const creds = db.get('credentials');
+    if (creds.isConnected) {
+      await gmailService.syncEmails();
+    }
+  } catch (err) {
+    await db.log('Gmail', 'Error', 'Auto-sync on page load failed: ' + err.message);
+  }
   const emails = db.findAll('emails');
   // Sort by timestamp descending (newest first)
   const sorted = [...emails].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));

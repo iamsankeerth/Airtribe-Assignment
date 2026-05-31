@@ -20,7 +20,7 @@ const DEFAULTS = {
     }
   },
   credentials: {
-    mode: 'Sandbox', // 'Sandbox' or 'Live'
+    mode: 'Live', // 'Sandbox' or 'Live'
     clientId: '',
     clientSecret: '',
     geminiApiKey: '',

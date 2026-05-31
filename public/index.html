@@ -239,32 +239,10 @@
             <p class="card-subtitle">Manage sandbox sandboxes, API modes, and encryption options.</p>
 
             <form id="settingsForm" class="settings-form">
-              <!-- Mode Selector -->
-              <div class="form-group">
+              <!-- Mode Selector Locked to Live -->
+              <div class="form-group" style="display: none;">
                 <label>System Mode</label>
-                <div class="mode-toggle-group">
-                  <label class="toggle-card">
-                    <input type="radio" name="systemMode" value="Sandbox" checked>
-                    <div class="toggle-card-content">
-                      <i class="fa-solid fa-flask"></i>
-                      <div class="toggle-info">
-                        <h4>Sandbox Mode (Recommended)</h4>
-                        <p>Simulate Gmail and LLM functionality instantly with zero credentials.</p>
-                      </div>
-                    </div>
-                  </label>
-
-                  <label class="toggle-card">
-                    <input type="radio" name="systemMode" value="Live">
-                    <div class="toggle-card-content">
-                      <i class="fa-solid fa-bolt text-glow"></i>
-                      <div class="toggle-info">
-                        <h4>Live Production Mode</h4>
-                        <p>Authenticate with your actual Google Account and use real Gemini API.</p>
-                      </div>
-                    </div>
-                  </label>
-                </div>
+                <input type="radio" name="systemMode" value="Live" checked>
               </div>
 
               <!-- Live Configuration Section -->
