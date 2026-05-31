@@ -121,7 +121,7 @@ async function silentSyncUpdate() {
       difference.forEach(log => {
         if (log.severity === 'Error') {
           showToast(log.message, 'error');
-        } else if (log.message.includes('dispatched') || log.message.includes('Success')) {
+        } else if ((log.message.includes('dispatched') || log.message.includes('Success')) && !log.message.includes('synced new email') && !log.message.includes('synchronize')) {
           showToast(log.message, 'success');
         }
       });
