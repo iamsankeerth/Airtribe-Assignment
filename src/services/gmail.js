@@ -51,8 +51,12 @@ class GmailService {
     creds.isConnected = true;
     creds.userEmail = userInfo.data.email || 'connected.user@gmail.com';
 
+    // Clear any mock/sandbox emails and drafts so they only see their real emails
+    db.set('emails', []);
+    db.set('drafts', []);
+
     await db.saveEncryptedCredentials(creds);
-    await db.log('Gmail', 'Info', `Successfully connected Live Gmail account (${creds.userEmail})`);
+    await db.log('Gmail', 'Info', `Successfully connected Live Gmail account (${creds.userEmail}). Cleared mock emails and drafts.`);
     return creds;
   }
 
