@@ -62,41 +62,15 @@ class MockGmailService {
     return creds;
   }
 
-  // Simulate syncing/fetching emails
+  // Simulate syncing/fetching emails (disabled to prevent mock data leaks)
   async syncEmails() {
     await db.log('Gmail', 'Info', 'Starting sandbox email synchronization...');
     
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Random chance of creating a new email during sync (simulates real-world check)
-    const emails = db.findAll('emails');
-    
-    // Add one new email from the mock list if they don't all exist
-    const currentSubjects = emails.map(e => e.subject);
-    const availableNewEmails = MOCK_SUBJECTS_AND_BODIES.filter(m => !currentSubjects.includes(m.subject));
-    
-    if (availableNewEmails.length > 0) {
-      const selected = availableNewEmails[Math.floor(Math.random() * availableNewEmails.length)];
-      const newEmail = {
-        id: 'msg-' + uuidv4().substring(0, 8),
-        threadId: 'thread-' + uuidv4().substring(0, 8),
-        sender: selected.sender || MOCK_SENDERS[Math.floor(Math.random() * MOCK_SENDERS.length)],
-        recipient: 'me <demo.user@draftly.ai>',
-        subject: selected.subject,
-        body: selected.body,
-        snippet: selected.body.substring(0, 70) + '...',
-        timestamp: new Date().toISOString(),
-        isRead: false
-      };
-      
-      await db.insert('emails', newEmail);
-      await db.log('Gmail', 'Info', `New incoming email received: "${newEmail.subject}" from ${newEmail.sender}`);
-    } else {
-      await db.log('Gmail', 'Info', 'Sandbox sync complete. No new messages found in simulated inbox.');
-    }
-
-    return db.findAll('emails');
+    await db.log('Gmail', 'Info', 'Sandbox sync complete. No messages found (Mock email generation is disabled).');
+    return [];
   }
 
   // Simulate sending a reply email

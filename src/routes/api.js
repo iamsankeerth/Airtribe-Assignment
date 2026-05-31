@@ -66,44 +66,10 @@ router.post('/config', async (req, res) => {
         db.set('drafts', []);
         await db.log('System', 'Info', 'Switched to Live Mode. Cleared all mock/sandbox emails and drafts.');
       } else if (mode === 'Sandbox') {
-        const defaultMockEmails = [
-          {
-            id: 'msg-2',
-            threadId: 'thread-2',
-            sender: 'Marcus Chen <marcus.chen@techcorp.io>',
-            recipient: 'me <demo.user@draftly.ai>',
-            subject: 'Question regarding pricing plan for Enterprise',
-            body: 'Hello,\n\nWe are currently evaluating Draftly for our customer support team of 45 agents.\n\nCould you please share your Enterprise pricing sheet? Additionally, we have a few questions:\n1. Do you support custom SLA agreements?\n2. Can we host the LLM within our own private AWS VPC?\n3. Do you support custom security reviews?\n\nLooking forward to hearing from you.\n\nThanks,\nMarcus Chen\nIT Infrastructure Lead, TechCorp',
-            snippet: 'We are currently evaluating Draftly for our customer support team of 45 agents...',
-            timestamp: new Date().toISOString(),
-            isRead: false
-          },
-          {
-            id: 'msg-3',
-            threadId: 'thread-3',
-            sender: 'David Miller <david.miller@gmail.com>',
-            recipient: 'me <demo.user@draftly.ai>',
-            subject: 'Catch up over coffee next week?',
-            body: "Hey mate!\n\nIt's been ages since we last grabbed a coffee. I'll be in your part of town next Wednesday and Thursday for a conference.\n\nAre you free to grab a quick coffee or lunch? Would love to catch up on what you've been working on lately. Let me know what day and time works best for you!\n\nCheers,\nDavid",
-            snippet: "Hey mate! It's been ages since we last grabbed a coffee. I'll be in...",
-            timestamp: new Date(Date.now() - 3600000 * 24).toISOString(),
-            isRead: false
-          },
-          {
-            id: 'msg-4',
-            threadId: 'thread-4',
-            sender: 'AWS Alerts <noreply@amazon.com>',
-            recipient: 'me <demo.user@draftly.ai>',
-            subject: 'WARNING: High Latency Detected on API-Gateway',
-            body: 'This is an automated notification from CloudWatch.\n\nMetric: IntegrationLatency\nNamespace: AWS/ApiGateway\nStage: Production\nThreshold: > 5000ms for 3 consecutive periods of 60 seconds.\nTrigger Time: 2026-05-31 11:20:00 UTC\n\nPlease check your active lambda instances and container logs to debug potential container warmups or database lockups.',
-            snippet: 'This is an automated notification from CloudWatch. Metric: IntegrationLatency...',
-            timestamp: new Date(Date.now() - 3600000 * 48).toISOString(),
-            isRead: true
-          }
-        ];
-        db.set('emails', defaultMockEmails);
+        // Completely clear emails and drafts; no more mock data under any mode
+        db.set('emails', []);
         db.set('drafts', []);
-        await db.log('System', 'Info', 'Switched to Sandbox Mode. Restored default sandbox emails.');
+        await db.log('System', 'Info', 'Switched to Sandbox Mode. Cleared all emails and drafts.');
       }
     }
 
