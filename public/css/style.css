@@ -285,7 +285,7 @@ body {
 /* Grid layout for Inbox Tab */
 .inbox-layout {
   display: grid;
-  grid-template-columns: 320px 1fr 340px;
+  grid-template-columns: 320px 1fr;
   gap: 1.5rem;
   height: 100%;
   min-height: 0;
