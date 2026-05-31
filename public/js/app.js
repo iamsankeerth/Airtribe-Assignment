@@ -184,7 +184,7 @@ function updateConfigUI() {
     text.textContent = 'Sandbox Mode';
   }
 
-  // 2. Setup credentials forms in settings tab
+  // 2. Setup credentials forms in settings tab if they exist in DOM
   const checkedRadio = document.querySelector(`input[name="systemMode"][value="${STATE.config.mode}"]`);
   if (checkedRadio) checkedRadio.checked = true;
 
@@ -192,18 +192,24 @@ function updateConfigUI() {
   const liveFields = document.getElementById('liveSettingsFields');
   const liveHeader = document.getElementById('liveSettingsHeader');
   
-  if (STATE.config.mode === 'Live') {
-    liveFields.classList.remove('hidden');
-    liveHeader.classList.remove('hidden');
-  } else {
-    liveFields.classList.add('hidden');
-    liveHeader.classList.add('hidden');
+  if (liveFields && liveHeader) {
+    if (STATE.config.mode === 'Live') {
+      liveFields.classList.remove('hidden');
+      liveHeader.classList.remove('hidden');
+    } else {
+      liveFields.classList.add('hidden');
+      liveHeader.classList.add('hidden');
+    }
   }
 
-  // Show Client ID & API Key masks
-  if (STATE.config.clientId) document.getElementById('clientId').value = STATE.config.clientId;
-  if (STATE.config.clientSecret) document.getElementById('clientSecret').value = STATE.config.clientSecret;
-  if (STATE.config.geminiApiKey) document.getElementById('geminiApiKey').value = STATE.config.geminiApiKey;
+  // Show Client ID & API Key masks if fields exist in DOM
+  const clientField = document.getElementById('clientId');
+  const secretField = document.getElementById('clientSecret');
+  const apiKeyField = document.getElementById('geminiApiKey');
+  
+  if (clientField && STATE.config.clientId) clientField.value = STATE.config.clientId;
+  if (secretField && STATE.config.clientSecret) secretField.value = STATE.config.clientSecret;
+  if (apiKeyField && STATE.config.geminiApiKey) apiKeyField.value = STATE.config.geminiApiKey;
 
   // Update Gmail Connect State
   const connGlow = document.getElementById('connectionGlow');
@@ -762,55 +768,61 @@ function setupEventListeners() {
     }
   });
 
-  // Toggle Live/Sandbox inputs inside settings page
+  // Toggle Live/Sandbox inputs inside settings page if form exists
   const configForm = document.getElementById('settingsForm');
-  configForm.addEventListener('change', () => {
-    const selectedMode = document.querySelector('input[name="systemMode"]:checked').value;
-    const fields = document.getElementById('liveSettingsFields');
-    const header = document.getElementById('liveSettingsHeader');
-    
-    if (selectedMode === 'Live') {
-      fields.classList.remove('hidden');
-      header.classList.remove('hidden');
-    } else {
-      fields.classList.add('hidden');
-      header.classList.add('hidden');
-    }
-  });
-
-  // Save Settings Forms
-  configForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const selectedMode = document.querySelector('input[name="systemMode"]:checked').value;
-    
-    const payload = {
-      mode: selectedMode,
-      clientId: document.getElementById('clientId').value,
-      clientSecret: document.getElementById('clientSecret').value,
-      geminiApiKey: document.getElementById('geminiApiKey').value
-    };
-
-    try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
+  if (configForm) {
+    configForm.addEventListener('change', () => {
+      const modeRadio = document.querySelector('input[name="systemMode"]:checked');
+      const selectedMode = modeRadio ? modeRadio.value : 'Live';
+      const fields = document.getElementById('liveSettingsFields');
+      const header = document.getElementById('liveSettingsHeader');
       
-      if (data.success) {
-        showToast('System configuration saved successfully.', 'success');
-        await fetchConfig();
-        await fetchEmails();
-        await fetchDrafts();
-        await fetchLogs();
-      } else {
-        throw new Error(data.error);
+      if (fields && header) {
+        if (selectedMode === 'Live') {
+          fields.classList.remove('hidden');
+          header.classList.remove('hidden');
+        } else {
+          fields.classList.add('hidden');
+          header.classList.add('hidden');
+        }
       }
-    } catch (err) {
-      showToast(`Settings save failed: ${err.message}`, 'error');
-    }
-  });
+    });
+
+    // Save Settings Forms
+    configForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const modeRadio = document.querySelector('input[name="systemMode"]:checked');
+      const selectedMode = modeRadio ? modeRadio.value : 'Live';
+      
+      const payload = {
+        mode: selectedMode,
+        clientId: document.getElementById('clientId').value,
+        clientSecret: document.getElementById('clientSecret').value,
+        geminiApiKey: document.getElementById('geminiApiKey').value
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+          showToast('System configuration saved successfully.', 'success');
+          await fetchConfig();
+          await fetchEmails();
+          await fetchDrafts();
+          await fetchLogs();
+        } else {
+          throw new Error(data.error);
+        }
+      } catch (err) {
+        showToast(`Settings save failed: ${err.message}`, 'error');
+      }
+    });
+  }
 
   // Account Connect button clicks
   document.getElementById('connectGmailBtn').addEventListener('click', async () => {

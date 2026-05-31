@@ -230,51 +230,6 @@
       <section class="tab-content" id="view-settings">
         <div class="settings-layout">
           
-          <div class="settings-card">
-            <h2>System Configurations</h2>
-            <p class="card-subtitle">Manage sandbox sandboxes, API modes, and encryption options.</p>
-
-            <form id="settingsForm" class="settings-form">
-              <!-- Mode Selector Locked to Live -->
-              <div class="form-group" style="display: none;">
-                <label>System Mode</label>
-                <input type="radio" name="systemMode" value="Live" checked>
-              </div>
-
-              <!-- Live Configuration Section -->
-              <div class="settings-section-divider" id="liveSettingsHeader">
-                <h3>Live Integrations (Google Cloud & Gemini)</h3>
-                <p>Ensure these values are accurate to enable full Live operations.</p>
-              </div>
-
-              <div class="settings-grid-fields" id="liveSettingsFields">
-                <div class="form-group">
-                  <label for="clientId">Google OAuth2 Client ID</label>
-                  <input type="text" id="clientId" placeholder="enter Google Client ID...">
-                  <span class="field-hint">Generate in <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a>. Redirect URI: <code>http://localhost:5000/api/auth/callback</code></span>
-                </div>
-
-                <div class="form-group">
-                  <label for="clientSecret">Google OAuth2 Client Secret</label>
-                  <input type="password" id="clientSecret" placeholder="enter Google Client Secret...">
-                </div>
-
-                <div class="form-group form-fullwidth">
-                  <label for="geminiApiKey">Google Gemini API Key</label>
-                  <input type="password" id="geminiApiKey" placeholder="enter Gemini API Key...">
-                  <span class="field-hint">Get an API key from <a href="https://aistudio.google.com" target="_blank">Google AI Studio</a> to power Live drafts.</span>
-                </div>
-              </div>
-
-              <!-- Save Buttons -->
-              <div class="form-actions">
-                <button type="submit" class="btn btn-primary" id="saveConfigBtn">
-                  <i class="fa-solid fa-floppy-disk"></i> Save Configurations
-                </button>
-              </div>
-            </form>
-          </div>
-
           <!-- OAuth Card -->
           <div class="settings-card connection-card" id="oauthCard">
             <h2>Gmail Account Connection</h2>
