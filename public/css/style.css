@@ -1,25 +1,27 @@
 /* ==========================================================================
    DRAFTLY PREMIUM DESIGN SYSTEM (VANILLA CSS)
+   Optimized with TASTE SKILL (tasteskill.dev)
+   dials: DESIGN_VARIANCE=6, MOTION_INTENSITY=4, VISUAL_DENSITY=5
    ========================================================================== */
 
 /* 1. TOKENS & RESET */
 :root {
-  --bg-primary: #04060d;
-  --bg-secondary: rgba(10, 14, 28, 0.7);
-  --bg-tertiary: rgba(20, 26, 46, 0.5);
+  --bg-primary: #05070c;
+  --bg-secondary: rgba(13, 17, 28, 0.7);
+  --bg-tertiary: rgba(22, 30, 48, 0.5);
   
   --border-color: rgba(255, 255, 255, 0.08);
-  --border-glow: rgba(138, 75, 243, 0.15);
+  --border-glow: rgba(245, 166, 35, 0.15);
   
-  --text-primary: #f1f3f9;
-  --text-secondary: #9aa2b8;
-  --text-muted: #626a80;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
   
-  /* Glowing Neon Colors */
-  --primary: #9d4edd;
-  --primary-glow: rgba(157, 78, 221, 0.4);
-  --accent: #00f5d4;
-  --accent-glow: rgba(0, 245, 212, 0.3);
+  /* Glowing Premium Accents (Slate & Burnished Copper) */
+  --primary: #f5a623;
+  --primary-glow: rgba(245, 166, 35, 0.35);
+  --accent: #f05a28;
+  --accent-glow: rgba(240, 90, 40, 0.25);
   
   /* Severity Colors */
   --success: #10b981;
@@ -32,7 +34,7 @@
   --info-glow: rgba(6, 182, 212, 0.2);
   
   --font-heading: 'Outfit', sans-serif;
-  --font-body: 'Inter', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
   
   --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
