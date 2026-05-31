@@ -114,18 +114,8 @@ async function silentSyncUpdate() {
     const logsRes = await fetch('/api/logs');
     const newLogs = await logsRes.json();
     
-    // Check if new log entries appeared to notify the user
+    // Check if new log entries appeared to update the UI
     if (newLogs.length > STATE.logs.length) {
-      const difference = newLogs.slice(0, newLogs.length - STATE.logs.length);
-      // Notify only if severity is Warning or Error, or if it relates to a sent mail
-      difference.forEach(log => {
-        if (log.severity === 'Error') {
-          showToast(log.message, 'error');
-        } else if ((log.message.includes('dispatched') || log.message.includes('Success')) && !log.message.includes('synced new email') && !log.message.includes('synchronize')) {
-          showToast(log.message, 'success');
-        }
-      });
-      
       STATE.logs = newLogs;
       renderLogsTable();
       
@@ -140,7 +130,10 @@ async function silentSyncUpdate() {
       renderEmailList();
       updateStatsUI();
       if (STATE.selectedEmailId) {
-        renderDraftArea(STATE.selectedEmailId);
+        const editorContainer = document.getElementById('workspaceDraftEditor');
+        if (editorContainer && !editorContainer.classList.contains('hidden')) {
+          renderDraftArea(STATE.selectedEmailId);
+        }
       }
     }
   } catch (err) {
@@ -332,10 +325,21 @@ function selectEmail(emailId) {
       </div>
     </div>
     <div class="email-full-body">${escapeHTML(email.body)}</div>
+    <div style="margin-top: 1.5rem; display: flex; justify-content: flex-start;">
+      <button class="btn btn-accent btn-glow" id="triggerAiSuggestionBtn">
+        <i class="fa-solid fa-wand-magic-sparkles"></i> AI Suggestion
+      </button>
+    </div>
   `;
 
-  // 2. Render Draft Reply Workspace Area
-  renderDraftArea(emailId);
+  // Hide Draft Reply Area by default
+  const editorContainer = document.getElementById('workspaceDraftEditor');
+  editorContainer.classList.add('hidden');
+
+  // Bind click trigger for AI Suggestion
+  document.getElementById('triggerAiSuggestionBtn').addEventListener('click', () => {
+    renderDraftArea(emailId);
+  });
 }
 
 async function renderDraftArea(emailId) {
