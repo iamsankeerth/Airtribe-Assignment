@@ -53,26 +53,26 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--font-body);
-  overflow-x: hidden;
-  min-height: 100vh;
+  overflow: hidden; /* Prevent body scroll entirely */
+  height: 100vh;
   line-height: 1.5;
 }
 
 /* Custom Scrollbar - High Contrast & Sizing */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 14px; /* Widened to be extremely easy to grab */
+  height: 14px;
 }
 ::-webkit-scrollbar-track {
-  background: #0d1117;
+  background: #090c14;
 }
 ::-webkit-scrollbar-thumb {
-  background: #30363d;
-  border-radius: 6px;
-  border: 2px solid #0d1117;
+  background: #475569; /* Slate-600 for outstanding contrast & visibility */
+  border-radius: 7px;
+  border: 3px solid #090c14;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--primary);
+  background: #3b82f6; /* Electric Blue on hover */
 }
 
 /* ==========================================================================
@@ -277,7 +277,9 @@ body {
 }
 
 .tab-content.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 /* Grid layout for Inbox Tab */
@@ -285,7 +287,7 @@ body {
   display: grid;
   grid-template-columns: 320px 1fr 340px;
   gap: 1.5rem;
-  height: calc(100vh - 120px);
+  height: 100%;
   min-height: 0;
 }
 
