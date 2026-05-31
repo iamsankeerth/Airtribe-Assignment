@@ -263,10 +263,17 @@ function renderEmailList() {
     const isSelected = email.id === STATE.selectedEmailId;
     const isUnread = !email.isRead;
     
-    // Format timestamp nicely
-    const dateObj = new Date(email.timestamp);
-    const dateString = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
-                       dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Format timestamp safely
+    let dateString = 'Unknown Date';
+    try {
+      const dateObj = new Date(email.timestamp);
+      if (!isNaN(dateObj.getTime())) {
+        dateString = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
+                     dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    } catch (err) {
+      console.error('Error formatting date in email list:', err);
+    }
 
     const item = document.createElement('div');
     item.className = `email-item ${isSelected ? 'selected' : ''} ${isUnread ? 'unread' : ''}`;
@@ -316,10 +323,32 @@ function selectEmail(emailId) {
   const email = STATE.emails.find(e => e.id === emailId);
   if (!email) return;
 
-  // 1. Render original email body
-  const dateObj = new Date(email.timestamp);
-  const dateString = dateObj.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + 
-                     dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // 1. Render original email body with safe date parsing
+  let dateString = 'Unknown Date';
+  try {
+    const dateObj = new Date(email.timestamp);
+    if (!isNaN(dateObj.getTime())) {
+      dateString = dateObj.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + 
+                   dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  } catch (err) {
+    console.error('Error formatting date in select email:', err);
+  }
+
+  // Detect if body contains HTML tags and render beautifully in an iframe
+  const isHtml = /<[a-z][\s\S]*>/i.test(email.body);
+  let emailBodyContent = '';
+  
+  if (isHtml) {
+    const escapedSrcDoc = escapeHTML(email.body);
+    emailBodyContent = `
+      <iframe srcdoc="${escapedSrcDoc}" style="width: 100%; border: 1px solid var(--border-color); min-height: 400px; background: white; border-radius: 8px; box-shadow: inset 0 0 5px rgba(0,0,0,0.02); margin-top: 1rem;" sandbox="allow-same-origin"></iframe>
+    `;
+  } else {
+    emailBodyContent = `
+      <div class="email-full-body">${escapeHTML(email.body)}</div>
+    `;
+  }
 
   const detailContainer = document.getElementById('workspaceEmailDetail');
   detailContainer.innerHTML = `
@@ -330,7 +359,7 @@ function selectEmail(emailId) {
         <div class="email-meta-date">${dateString}</div>
       </div>
     </div>
-    <div class="email-full-body">${escapeHTML(email.body)}</div>
+    ${emailBodyContent}
     <div style="margin-top: 1.5rem; display: flex; justify-content: flex-start;">
       <button class="btn btn-accent btn-glow" id="triggerAiSuggestionBtn">
         AI Suggestion
