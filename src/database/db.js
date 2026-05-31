@@ -30,52 +30,7 @@ const DEFAULTS = {
     isConnected: false,
     userEmail: 'demo.user@draftly.ai'
   },
-  emails: [
-    {
-      id: 'msg-1',
-      threadId: 'thread-1',
-      sender: 'Sarah Jenkins <sarah.jenkins@brightscale.co>',
-      recipient: 'me <demo.user@draftly.ai>',
-      subject: 'Partnership Opportunity with BrightScale',
-      body: `Hi Team,\n\nI hope this email finds you well.\n\nI've been following your recent launch and the work you're doing in AI automation. Our team at BrightScale is looking to integrate an automated assistant into our email pipelines, and we think your solution would fit perfectly.\n\nAre you available for a 15-minute introductory call this coming Thursday at 3:00 PM EST?\n\nBest regards,\nSarah Jenkins\nDirector of Operations, BrightScale`,
-      snippet: "Hi Team, I hope this email finds you well. I've been following your recent...",
-      timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), // 2 hours ago
-      isRead: false
-    },
-    {
-      id: 'msg-2',
-      threadId: 'thread-2',
-      sender: 'Marcus Chen <marcus.chen@techcorp.io>',
-      recipient: 'me <demo.user@draftly.ai>',
-      subject: 'Question regarding pricing plan for Enterprise',
-      body: `Hello,\n\nWe are currently evaluating Draftly for our customer support team of 45 agents.\n\nCould you please share your Enterprise pricing sheet? Additionally, we have a few questions:\n1. Do you support custom SLA agreements?\n2. Can we host the LLM within our own private AWS VPC?\n3. Do you support custom security reviews?\n\nLooking forward to hearing from you.\n\nThanks,\nMarcus Chen\nIT Infrastructure Lead, TechCorp`,
-      snippet: "We are currently evaluating Draftly for our customer support team of 45 agents...",
-      timestamp: new Date(Date.now() - 3600000 * 8).toISOString(), // 8 hours ago
-      isRead: false
-    },
-    {
-      id: 'msg-3',
-      threadId: 'thread-3',
-      sender: 'David Miller <david.miller@gmail.com>',
-      recipient: 'me <demo.user@draftly.ai>',
-      subject: 'Catch up over coffee next week?',
-      body: `Hey mate!\n\nIt's been ages since we last grabbed a coffee. I'll be in your part of town next Wednesday and Thursday for a conference.\n\nAre you free to grab a quick coffee or lunch? Would love to catch up on what you've been working on lately. Let me know what day and time works best for you!\n\nCheers,\nDavid`,
-      snippet: "Hey mate! It's been ages since we last grabbed a coffee. I'll be in...",
-      timestamp: new Date(Date.now() - 3600000 * 18).toISOString(), // 18 hours ago
-      isRead: false
-    },
-    {
-      id: 'msg-4',
-      threadId: 'thread-4',
-      sender: 'AWS Alerts <noreply@amazon.com>',
-      recipient: 'me <demo.user@draftly.ai>',
-      subject: 'WARNING: High Latency Detected on API-Gateway',
-      body: `This is an automated notification from CloudWatch.\n\nMetric: IntegrationLatency\nNamespace: AWS/ApiGateway\nStage: Production\nThreshold: > 5000ms for 3 consecutive periods of 60 seconds.\nTrigger Time: 2026-05-31 11:20:00 UTC\n\nPlease check your active lambda instances and container logs to debug potential container warmups or database lockups.`,
-      snippet: "This is an automated notification from CloudWatch. Metric: IntegrationLatency...",
-      timestamp: new Date(Date.now() - 3600000 * 24).toISOString(), // 1 day ago
-      isRead: true
-    }
-  ],
+  emails: [],
   drafts: [],
   logs: [
     {
