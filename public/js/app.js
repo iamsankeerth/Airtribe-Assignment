@@ -327,7 +327,7 @@ function selectEmail(emailId) {
     <div class="email-full-body">${escapeHTML(email.body)}</div>
     <div style="margin-top: 1.5rem; display: flex; justify-content: flex-start;">
       <button class="btn btn-accent btn-glow" id="triggerAiSuggestionBtn">
-        <i class="fa-solid fa-wand-magic-sparkles"></i> AI Suggestion
+        AI Suggestion
       </button>
     </div>
   `;
