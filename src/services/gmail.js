@@ -51,12 +51,12 @@ class GmailService {
     creds.isConnected = true;
     creds.userEmail = userInfo.data.email || 'connected.user@gmail.com';
 
-    // Clear any mock/sandbox emails and drafts so they only see their real emails
+    // Clear cached email state so the dashboard reflects the connected account
     db.set('emails', []);
     db.set('drafts', []);
 
     await db.saveEncryptedCredentials(creds);
-    await db.log('Gmail', 'Info', `Successfully connected Live Gmail account (${creds.userEmail}). Cleared mock emails and drafts.`);
+    await db.log('Gmail', 'Info', `Successfully connected Gmail account (${creds.userEmail}). Cleared cached emails and drafts.`);
     return creds;
   }
 
@@ -99,85 +99,112 @@ class GmailService {
     return oauth2Client;
   }
 
-  // Parse Gmail payload bodies
-  parseBody(payload) {
-    let body = '';
-    if (payload.body && payload.body.data) {
-      body = Buffer.from(payload.body.data, 'base64').toString('utf8');
-    } else if (payload.parts) {
+  // Helper to recursively find payload parts by MIME type
+  findPart(payload, mimeType) {
+    if (payload.mimeType === mimeType && payload.body && payload.body.data) {
+      return Buffer.from(payload.body.data, 'base64').toString('utf8');
+    }
+    if (payload.parts) {
       for (const part of payload.parts) {
-        if (part.mimeType === 'text/plain' && part.body && part.body.data) {
-          body += Buffer.from(part.body.data, 'base64').toString('utf8');
-        } else if (part.mimeType === 'text/html' && part.body && part.body.data && !body) {
-          // Fallback to HTML if plain text not parsed yet
-          const html = Buffer.from(part.body.data, 'base64').toString('utf8');
-          // Simple tag stripper for display
-          body = html.replace(/<[^>]*>/g, ' ');
-        } else if (part.parts) {
-          body += this.parseBody(part);
-        }
+        const found = this.findPart(part, mimeType);
+        if (found) return found;
       }
     }
-    return body;
+    return null;
+  }
+
+  // Parse Gmail payload bodies (prioritizing rich HTML for gorgeous visual rendering)
+  parseBody(payload) {
+    // 1. Try to extract rich HTML content first
+    const htmlContent = this.findPart(payload, 'text/html');
+    if (htmlContent) {
+      return htmlContent;
+    }
+    // 2. Fall back to plain text content
+    const plainContent = this.findPart(payload, 'text/plain');
+    if (plainContent) {
+      return plainContent;
+    }
+    // 3. Fall back to root payload body if any
+    if (payload.body && payload.body.data) {
+      return Buffer.from(payload.body.data, 'base64').toString('utf8');
+    }
+    return '';
   }
 
   async syncEmails() {
-    await db.log('Gmail', 'Info', 'Syncing live Gmail inbox...');
+    await db.log('Gmail', 'Info', 'Syncing live Gmail inbox, sent, and spam folders...');
     const authClient = await this.getAuthenticatedClient();
     const gmail = google.gmail({ version: 'v1', auth: authClient });
 
-    // Fetch up to 10 recent unread/recent messages
-    const res = await gmail.users.messages.list({
-      userId: 'me',
-      q: 'is:inbox',
-      maxResults: 10
-    });
-
-    const messages = res.data.messages || [];
-    await db.log('Gmail', 'Info', `Found ${messages.length} messages in Gmail list.`);
+    const foldersToSync = [
+      { name: 'inbox', query: 'is:inbox', max: 20 },
+      { name: 'sent', query: 'from:me', max: 15 },
+      { name: 'spam', query: 'is:spam', max: 10 }
+    ];
 
     const syncedEmails = [];
 
-    for (const msg of messages) {
-      // Check if we already have this email parsed and stored
-      const existing = db.findById('emails', msg.id);
-      if (existing) {
-        syncedEmails.push(existing);
-        continue;
-      }
-
+    for (const folderConfig of foldersToSync) {
       try {
-        const detail = await gmail.users.messages.get({
+        const res = await gmail.users.messages.list({
           userId: 'me',
-          id: msg.id,
-          format: 'full'
+          q: folderConfig.query,
+          maxResults: folderConfig.max
         });
 
-        const headers = detail.data.payload.headers;
-        const subject = (headers.find(h => h.name.toLowerCase() === 'subject') || {}).value || 'No Subject';
-        const sender = (headers.find(h => h.name.toLowerCase() === 'from') || {}).value || 'Unknown Sender';
-        const recipient = (headers.find(h => h.name.toLowerCase() === 'to') || {}).value || 'me';
-        const dateStr = (headers.find(h => h.name.toLowerCase() === 'date') || {}).value || new Date().toISOString();
-        const snippet = detail.data.snippet || '';
-        const body = this.parseBody(detail.data.payload) || snippet || '(Empty Body)';
+        const messages = res.data.messages || [];
+        await db.log('Gmail', 'Info', `Syncing folder "${folderConfig.name}" - Found ${messages.length} messages.`);
 
-        const parsedEmail = {
-          id: msg.id,
-          threadId: detail.data.threadId,
-          sender,
-          recipient,
-          subject,
-          body,
-          snippet,
-          timestamp: new Date(dateStr).toISOString(),
-          isRead: !detail.data.labelIds.includes('UNREAD')
-        };
+        for (const msg of messages) {
+          // Check if we already have this email parsed and stored
+          let existing = db.findById('emails', msg.id);
+          if (existing) {
+            // Reconcile folder tag if needed
+            if (existing.folder !== folderConfig.name) {
+              existing = await db.updateById('emails', msg.id, { folder: folderConfig.name });
+            }
+            syncedEmails.push(existing);
+            continue;
+          }
 
-        await db.insert('emails', parsedEmail);
-        await db.log('Gmail', 'Info', `Successfully synced new email: "${subject}" from ${sender}`);
-        syncedEmails.push(parsedEmail);
+          try {
+            const detail = await gmail.users.messages.get({
+              userId: 'me',
+              id: msg.id,
+              format: 'full'
+            });
+
+            const headers = detail.data.payload.headers;
+            const subject = (headers.find(h => h.name.toLowerCase() === 'subject') || {}).value || 'No Subject';
+            const sender = (headers.find(h => h.name.toLowerCase() === 'from') || {}).value || 'Unknown Sender';
+            const recipient = (headers.find(h => h.name.toLowerCase() === 'to') || {}).value || 'me';
+            const dateStr = (headers.find(h => h.name.toLowerCase() === 'date') || {}).value || new Date().toISOString();
+            const snippet = detail.data.snippet || '';
+            const body = this.parseBody(detail.data.payload) || snippet || '(Empty Body)';
+
+            const parsedEmail = {
+              id: msg.id,
+              threadId: detail.data.threadId,
+              sender,
+              recipient,
+              subject,
+              body,
+              snippet,
+              timestamp: new Date(dateStr).toISOString(),
+              isRead: !detail.data.labelIds.includes('UNREAD'),
+              folder: folderConfig.name
+            };
+
+            await db.insert('emails', parsedEmail);
+            await db.log('Gmail', 'Info', `Successfully synced new email in "${folderConfig.name}": "${subject}"`);
+            syncedEmails.push(parsedEmail);
+          } catch (err) {
+            await db.log('Gmail', 'Error', `Failed to fetch detail for msg ID ${msg.id}: ${err.message}`);
+          }
+        }
       } catch (err) {
-        await db.log('Gmail', 'Error', `Failed to fetch detail for msg ID ${msg.id}: ${err.message}`);
+        await db.log('Gmail', 'Error', `Failed to sync folder "${folderConfig.name}": ${err.message}`);
       }
     }
 

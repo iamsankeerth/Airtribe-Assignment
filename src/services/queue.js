@@ -1,6 +1,6 @@
 const db = require('../database/db');
+const { inboxRepo, outboxRepo } = require('../database/repositories');
 const gmailService = require('./gmail');
-const mockGmailService = require('./mockGmail');
 
 class SendQueueService {
   constructor() {
@@ -14,11 +14,7 @@ class SendQueueService {
     this.isProcessing = true;
 
     try {
-      const drafts = db.findAll('drafts');
-      // Find drafts that need to be sent
-      const pendingDrafts = drafts.filter(
-        d => (d.status === 'Approved' || d.status === 'Retrying') && d.retryCount < 5
-      );
+      const pendingDrafts = outboxRepo.listPending();
 
       if (pendingDrafts.length > 0) {
         await db.log('Queue', 'Info', `Found ${pendingDrafts.length} pending draft(s) in sending queue.`);
@@ -50,25 +46,22 @@ class SendQueueService {
   }
 
   async processDraftSend(draft) {
-    const creds = db.get('credentials');
-    const email = db.findById('emails', draft.emailId);
+    const email = inboxRepo.findById(draft.emailId);
 
     if (!email) {
       await db.log('Queue', 'Error', `Orphaned draft ${draft.id}: Matching email ${draft.emailId} not found. Archiving draft.`);
-      await db.updateById('drafts', draft.id, { status: 'Rejected', errorLog: 'Original email not found.' });
+      await outboxRepo.update(draft.id, { status: 'Rejected', errorLog: 'Original email not found.' });
       return;
     }
 
     await db.log('Queue', 'Info', `Processing transmission lock for Draft: ${draft.id}`);
 
     // Update status to "Sending"
-    await db.updateById('drafts', draft.id, { status: 'Sending' });
-
-    const activeService = creds.mode === 'Sandbox' ? mockGmailService : gmailService;
+    await outboxRepo.update(draft.id, { status: 'Sending' });
 
     try {
       // Send the reply!
-      const sendResult = await activeService.sendReply(
+      const sendResult = await gmailService.sendReply(
         draft.id,
         draft.content,
         email.threadId,
@@ -77,7 +70,7 @@ class SendQueueService {
       );
 
       // Success updates
-      await db.updateById('drafts', draft.id, {
+      await outboxRepo.update(draft.id, {
         status: 'Sent',
         sentAt: new Date().toISOString(),
         messageId: sendResult.messageId,
@@ -85,7 +78,7 @@ class SendQueueService {
       });
 
       // Mark the original email as read/replied
-      await db.updateById('emails', email.id, { isRead: true });
+      await inboxRepo.markAsRead(email.id);
       await db.log('Queue', 'Info', `Successfully processed send event for Draft: ${draft.id}. Message dispatched!`);
 
     } catch (err) {
@@ -104,12 +97,13 @@ class SendQueueService {
         // Fatal Auth Error: Do not retry automatically, notify the user.
         await db.log('Queue', 'Error', 'Fatal Authentication failure detected. Halting queue and notifying client.');
         
-        await db.updateById('drafts', draft.id, {
+        await outboxRepo.update(draft.id, {
           status: 'Failed',
           errorLog: `Fatal Auth Error: ${errorMessage}. Please reconnect your Gmail account.`
         });
 
         // Set isConnected to false and trigger user alert in system state
+        const creds = db.get('credentials');
         creds.isConnected = false;
         db.set('credentials', creds);
         
@@ -121,7 +115,7 @@ class SendQueueService {
         if (nextRetryCount >= 5) {
           // Exhausted all retries
           await db.log('Queue', 'Error', `Exceeded maximum retry attempts (5/5) for Draft: ${draft.id}. Halting.`);
-          await db.updateById('drafts', draft.id, {
+          await outboxRepo.update(draft.id, {
             status: 'Failed',
             retryCount: nextRetryCount,
             errorLog: `Exceeded maximum send attempts. Last error: ${errorMessage}`
@@ -133,7 +127,7 @@ class SendQueueService {
 
           await db.log('Queue', 'Info', `Draft ${draft.id} scheduled for retry #${nextRetryCount} in ${backoffSec} seconds (at ${new Date(nextAttemptTime).toLocaleTimeString()}).`);
 
-          await db.updateById('drafts', draft.id, {
+          await outboxRepo.update(draft.id, {
             status: 'Retrying',
             retryCount: nextRetryCount,
             errorLog: `Attempt #${nextRetryCount} failed: ${errorMessage}. Next retry in ${backoffSec}s.`,
@@ -144,7 +138,7 @@ class SendQueueService {
     }
   }
 
-  // Trigger continuous processing every 10 seconds in the background
+  // Trigger continuous processing every 5 seconds in the background
   startScheduler() {
     // Process queue immediately on startup
     this.processQueue();
@@ -152,7 +146,7 @@ class SendQueueService {
     // Set interval to check queue
     this.intervalId = setInterval(() => {
       // Filter out retries that haven't met their backoff timing yet
-      const drafts = db.findAll('drafts');
+      const drafts = outboxRepo.list();
       const now = Date.now();
       const hasEligibleDrafts = drafts.some(
         d => (d.status === 'Approved') || 

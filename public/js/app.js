@@ -5,6 +5,7 @@
 // 1. STATE CONFIGURATION
 const STATE = {
   activeTab: 'inbox',
+  currentFolder: 'inbox',
   emails: [],
   drafts: [],
   selectedEmailId: null,
@@ -41,6 +42,13 @@ async function initApp() {
     renderEmptyWorkspace();
   }
 
+  // Trigger a non-blocking background synchronization on page load
+  if (STATE.config.isConnected) {
+    fetch('/api/emails/sync', { method: 'POST' }).catch(err => {
+      console.error('Background startup sync failed:', err);
+    });
+  }
+
   // Start polling logs and queue updates every 4 seconds to reflect backend events in real-time
   setInterval(() => {
     silentSyncUpdate();
@@ -63,19 +71,20 @@ async function fetchConfig() {
 
 async function fetchEmails() {
   try {
-    const res = await fetch('/api/emails');
+    const folder = STATE.currentFolder || 'inbox';
+    const res = await fetch(`/api/emails?folder=${folder}`);
     STATE.emails = await res.json();
     renderEmailList();
     updateStatsUI();
   } catch (err) {
-    showToast('Failed to fetch inbox emails', 'error');
+    showToast('Failed to fetch emails', 'error');
   }
 }
 
 async function fetchDrafts() {
   try {
     const res = await fetch('/api/drafts');
-    STATE.drafts = await res.json();
+    STATE.drafts = normalizeDrafts(await res.json());
     
     // If we have a currently selected email, update its draft display
     if (STATE.selectedEmailId) {
@@ -84,6 +93,31 @@ async function fetchDrafts() {
     updateStatsUI();
   } catch (err) {
     showToast('Failed to load email drafts', 'error');
+  }
+}
+
+async function preloadDraftForEmail(emailId) {
+  const email = STATE.emails.find(e => e.id === emailId);
+  if (!email || isNoReplySender(email.sender)) return null;
+
+  const existingDraft = STATE.drafts.find(d => d.emailId === emailId);
+  if (existingDraft) return existingDraft;
+
+  try {
+    const res = await fetch(`/api/drafts/${emailId}`);
+    if (!res.ok) return null;
+
+    const draft = normalizeDraft(await res.json());
+    const existingIndex = STATE.drafts.findIndex(d => d.emailId === emailId);
+    if (existingIndex >= 0) {
+      STATE.drafts[existingIndex] = draft;
+    } else {
+      STATE.drafts.push(draft);
+    }
+    return draft;
+  } catch (err) {
+    console.error('Background draft preload failed:', err);
+    return null;
   }
 }
 
@@ -120,11 +154,12 @@ async function silentSyncUpdate() {
       renderLogsTable();
       
       // Reload stats & drafts silently to refresh delivery indicators
+      const folder = STATE.currentFolder || 'inbox';
       const [draftsRes, emailsRes] = await Promise.all([
         fetch('/api/drafts'),
-        fetch('/api/emails')
+        fetch(`/api/emails?folder=${folder}`)
       ]);
-      STATE.drafts = await draftsRes.json();
+      STATE.drafts = normalizeDrafts(await draftsRes.json());
       STATE.emails = await emailsRes.json();
       
       renderEmailList();
@@ -134,11 +169,59 @@ async function silentSyncUpdate() {
         if (editorContainer && !editorContainer.classList.contains('hidden')) {
           renderDraftArea(STATE.selectedEmailId);
         }
+      } else if (STATE.emails.length > 0) {
+        selectEmail(STATE.emails[0].id);
       }
     }
   } catch (err) {
     console.error('Silent sync failed:', err);
   }
+}
+
+function sanitizeDraftContent(content) {
+  if (typeof content !== 'string') return content;
+  return content.replace(/Demo User/g, 'Sankeerth Masetty');
+}
+
+function normalizeDraft(draft) {
+  if (!draft || typeof draft !== 'object') return draft;
+  return {
+    ...draft,
+    content: sanitizeDraftContent(draft.content)
+  };
+}
+
+function normalizeDrafts(drafts) {
+  if (!Array.isArray(drafts)) return [];
+  return drafts.map(normalizeDraft);
+}
+
+function scrollWorkspaceToTop() {
+  const appContent = document.querySelector('.app-content');
+  const detailSection = document.getElementById('workspaceEmailDetail');
+  if (!detailSection) return;
+
+  if (appContent) {
+    const targetTop = Math.max(0, detailSection.offsetTop - 16);
+    appContent.scrollTo({ top: targetTop, behavior: 'smooth' });
+    return;
+  }
+
+  detailSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function scrollWorkspaceToDraftEditor() {
+  const appContent = document.querySelector('.app-content');
+  const editorContainer = document.getElementById('workspaceDraftEditor');
+  if (!editorContainer) return;
+
+  if (appContent) {
+    const targetTop = Math.max(0, editorContainer.offsetTop - 100);
+    appContent.scrollTo({ top: targetTop, behavior: 'smooth' });
+    return;
+  }
+
+  editorContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ----------------------------------------------------
@@ -171,45 +254,28 @@ function setupNavigation() {
 }
 
 function updateConfigUI() {
-  const badge = document.getElementById('systemModeBadge');
-  const indicator = badge.querySelector('.pulse-indicator');
-  const text = badge.querySelector('.badge-text');
-
-  // 1. Setup mode badge in header
-  if (STATE.config.mode === 'Live') {
-    indicator.className = 'pulse-indicator status-live';
-    text.textContent = 'Live Mode';
-  } else {
-    indicator.className = 'pulse-indicator status-sandbox';
-    text.textContent = 'Sandbox Mode';
-  }
-
-  // 2. Setup credentials forms in settings tab if they exist in DOM
-  const checkedRadio = document.querySelector(`input[name="systemMode"][value="${STATE.config.mode}"]`);
-  if (checkedRadio) checkedRadio.checked = true;
-
-  // Toggle visible credential inputs based on system mode
-  const liveFields = document.getElementById('liveSettingsFields');
-  const liveHeader = document.getElementById('liveSettingsHeader');
-  
-  if (liveFields && liveHeader) {
-    if (STATE.config.mode === 'Live') {
-      liveFields.classList.remove('hidden');
-      liveHeader.classList.remove('hidden');
-    } else {
-      liveFields.classList.add('hidden');
-      liveHeader.classList.add('hidden');
-    }
-  }
-
-  // Show Client ID & API Key masks if fields exist in DOM
   const clientField = document.getElementById('clientId');
   const secretField = document.getElementById('clientSecret');
-  const apiKeyField = document.getElementById('geminiApiKey');
+  const geminiField = document.getElementById('geminiApiKey');
+  const openaiField = document.getElementById('openaiApiKey');
+  const anthropicField = document.getElementById('anthropicApiKey');
+  const providerField = document.getElementById('aiProvider');
   
   if (clientField && STATE.config.clientId) clientField.value = STATE.config.clientId;
   if (secretField && STATE.config.clientSecret) secretField.value = STATE.config.clientSecret;
-  if (apiKeyField && STATE.config.geminiApiKey) apiKeyField.value = STATE.config.geminiApiKey;
+  
+  if (geminiField && STATE.config.geminiApiKey) {
+    geminiField.value = STATE.config.geminiApiKey;
+  }
+  if (openaiField && STATE.config.openaiApiKey) {
+    openaiField.value = STATE.config.openaiApiKey;
+  }
+  if (anthropicField && STATE.config.anthropicApiKey) {
+    anthropicField.value = STATE.config.anthropicApiKey;
+  }
+  if (providerField && STATE.config.aiProvider) {
+    providerField.value = STATE.config.aiProvider;
+  }
 
   // Update Gmail Connect State
   const connGlow = document.getElementById('connectionGlow');
@@ -231,20 +297,48 @@ function updateConfigUI() {
     connGlow.className = 'status-glow-icon disconnected';
     connGlow.innerHTML = '<i class="fa-solid fa-plug"></i>';
     connTitle.textContent = 'Disconnected';
-    
-    if (STATE.config.mode === 'Live') {
-      connDesc.textContent = 'Action Required: Connect Google OAuth2 credentials to synch and reply.';
-      connBtn.classList.remove('hidden');
-      disconnBtn.classList.add('hidden');
-      // If Live Mode and not connected, show alerts
-      alertBanner.classList.remove('hidden');
-    } else {
-      connDesc.textContent = 'Sandbox simulated connector. Click connect to mock auth sequence.';
-      connBtn.classList.remove('hidden');
-      disconnBtn.classList.add('hidden');
-      alertBanner.classList.add('hidden');
-    }
+    connDesc.textContent = 'Action required: connect Google OAuth to sync and send live email replies.';
+    connBtn.classList.remove('hidden');
+    disconnBtn.classList.add('hidden');
+    alertBanner.classList.remove('hidden');
   }
+}
+
+function extractEmailAddress(sender = '') {
+  const match = sender.match(/<([^>]+)>/);
+  return (match ? match[1] : sender).trim().toLowerCase();
+}
+
+function isNoReplySender(sender = '') {
+  return /\b(no[\s._-]?reply|do[\s._-]?not[\s._-]?reply|donotreply)\b/i.test(extractEmailAddress(sender));
+}
+
+function setToneChipsDisabled(disabled) {
+  document.querySelectorAll('.tone-chip').forEach(chip => {
+    chip.disabled = disabled;
+    chip.classList.toggle('disabled', disabled);
+  });
+}
+
+function renderNoReplyDraftState(email) {
+  const editorContainer = document.getElementById('workspaceDraftEditor');
+  editorContainer.classList.remove('hidden');
+
+  const btnContainer = document.getElementById('triggerAiSuggestionBtnContainer');
+  if (btnContainer) btnContainer.style.display = 'none';
+
+  document.getElementById('draftTextArea').value =
+    `This is a no-reply email ID (${extractEmailAddress(email.sender)}). You will not get a reply from this email ID.`;
+  document.getElementById('draftTextArea').disabled = true;
+  document.getElementById('draftStatusBadge').textContent = 'No Reply';
+  document.getElementById('draftStatusBadge').className = 'status-indicator-tag status-failed';
+  document.getElementById('draftTimestamp').textContent = 'Suggestion unavailable';
+  document.getElementById('retryStatusText').classList.add('hidden');
+  document.getElementById('saveDraftBtn').disabled = true;
+  document.getElementById('approveSendBtn').disabled = true;
+  document.getElementById('rejectDraftBtn').disabled = true;
+  document.getElementById('approveSendBtn').innerHTML = '<i class="fa-solid fa-ban"></i> Cannot Send';
+  setToneChipsDisabled(true);
 }
 
 function renderEmailList() {
@@ -254,7 +348,9 @@ function renderEmailList() {
   document.getElementById('emailCount').textContent = STATE.emails.length;
 
   if (STATE.emails.length === 0) {
-    container.innerHTML = '<div class="empty-workspace-state"><h3>Inbox Empty</h3><p>Sync your inbox to fetch messages.</p></div>';
+    let folderName = (STATE.currentFolder || 'inbox').toUpperCase();
+    if (folderName === 'ALL') folderName = 'ALL MAIL';
+    container.innerHTML = `<div class="empty-workspace-state"><h3>${folderName} Empty</h3><p>No messages found. Sync your inbox to fetch new messages.</p></div>`;
     renderEmptyWorkspace();
     return;
   }
@@ -279,6 +375,8 @@ function renderEmailList() {
     item.className = `email-item ${isSelected ? 'selected' : ''} ${isUnread ? 'unread' : ''}`;
     item.setAttribute('id', `email-item-${email.id}`);
     
+    const emailFolder = email.folder || 'inbox';
+    
     item.innerHTML = `
       <div class="email-item-header">
         <span class="email-sender">${escapeHTML(email.sender)}</span>
@@ -288,7 +386,10 @@ function renderEmailList() {
         ${isUnread ? '<span class="unread-dot"></span>' : ''}
         ${escapeHTML(email.subject)}
       </div>
-      <div class="email-snippet">${escapeHTML(email.snippet || '')}</div>
+      <div class="email-item-footer">
+        <span class="email-snippet">${escapeHTML(email.snippet || '')}</span>
+        <span class="folder-badge badge-${emailFolder}">${emailFolder}</span>
+      </div>
     `;
 
     item.addEventListener('click', () => {
@@ -337,18 +438,6 @@ function selectEmail(emailId) {
 
   // Detect if body contains HTML tags and render beautifully in an iframe
   const isHtml = /<[a-z][\s\S]*>/i.test(email.body);
-  let emailBodyContent = '';
-  
-  if (isHtml) {
-    const escapedSrcDoc = escapeHTML(email.body);
-    emailBodyContent = `
-      <iframe srcdoc="${escapedSrcDoc}" style="width: 100%; border: 1px solid var(--border-color); min-height: 400px; background: white; border-radius: 8px; box-shadow: inset 0 0 5px rgba(0,0,0,0.02); margin-top: 1rem;" sandbox="allow-same-origin"></iframe>
-    `;
-  } else {
-    emailBodyContent = `
-      <div class="email-full-body">${escapeHTML(email.body)}</div>
-    `;
-  }
 
   const detailContainer = document.getElementById('workspaceEmailDetail');
   detailContainer.innerHTML = `
@@ -356,36 +445,109 @@ function selectEmail(emailId) {
       <h2 class="email-full-title">${escapeHTML(email.subject)}</h2>
       <div class="email-meta-row">
         <div class="email-meta-from">From: <strong>${escapeHTML(email.sender)}</strong></div>
-        <div class="email-meta-date">${dateString}</div>
+        <div class="email-meta-actions" id="triggerAiSuggestionBtnContainer">
+          <button class="btn btn-accent btn-glow" id="triggerAiSuggestionBtn">
+            AI Suggestion
+          </button>
+          <div class="email-meta-date">${dateString}</div>
+        </div>
       </div>
     </div>
-    ${emailBodyContent}
-    <div style="margin-top: 1.5rem; display: flex; justify-content: flex-start;">
-      <button class="btn btn-accent btn-glow" id="triggerAiSuggestionBtn">
-        AI Suggestion
-      </button>
-    </div>
+    <div id="emailBodyContainer"></div>
   `;
+
+  const bodyContainer = document.getElementById('emailBodyContainer');
+  if (isHtml) {
+    const iframe = document.createElement('iframe');
+    iframe.style.width = '100%';
+    iframe.style.border = '1px solid var(--border-color)';
+    iframe.style.minHeight = '450px';
+    iframe.style.background = 'white';
+    iframe.style.borderRadius = '8px';
+    iframe.style.boxShadow = 'inset 0 0 5px rgba(0,0,0,0.02)';
+    iframe.style.marginTop = '1rem';
+    iframe.style.overflow = 'hidden';
+    iframe.setAttribute('sandbox', 'allow-same-origin');
+    iframe.setAttribute('scrolling', 'no');
+    iframe.srcdoc = email.body;
+    
+    // Automatically stretch iframe height to match its scroll content dynamically
+    iframe.addEventListener('load', () => {
+      setTimeout(() => {
+        try {
+          const doc = iframe.contentWindow.document;
+          const body = doc.body;
+          const html = doc.documentElement;
+          const height = Math.max(
+            body.scrollHeight,
+            body.offsetHeight,
+            html.clientHeight,
+            html.scrollHeight,
+            html.offsetHeight
+          );
+          iframe.style.height = (height + 25) + 'px';
+        } catch (err) {
+          console.warn('Could not auto-adjust iframe height:', err);
+          iframe.style.height = '800px'; // Generous fallback height
+        }
+      }, 100);
+    });
+
+    bodyContainer.appendChild(iframe);
+  } else {
+    const div = document.createElement('div');
+    div.className = 'email-full-body';
+    div.textContent = email.body;
+    bodyContainer.appendChild(div);
+  }
 
   // Hide Draft Reply Area by default
   const editorContainer = document.getElementById('workspaceDraftEditor');
   editorContainer.classList.add('hidden');
 
+  scrollWorkspaceToTop();
+
+  // Make sure the triggering button container starts visible
+  const btnContainer = document.getElementById('triggerAiSuggestionBtnContainer');
+  if (btnContainer) btnContainer.style.display = 'flex';
+
+  // Warm the suggestion in the background so the AI panel opens with a preloaded draft.
+  preloadDraftForEmail(emailId);
+
   // Bind click trigger for AI Suggestion
   document.getElementById('triggerAiSuggestionBtn').addEventListener('click', () => {
+    if (isNoReplySender(email.sender)) {
+      renderNoReplyDraftState(email);
+      showToast('This is a no-reply email ID. You will not get a reply from this email ID.', 'warning');
+      return;
+    }
     renderDraftArea(emailId);
   });
 }
 
 async function renderDraftArea(emailId) {
+  const email = STATE.emails.find(e => e.id === emailId);
+  if (!email) return;
+  if (isNoReplySender(email.sender)) {
+    renderNoReplyDraftState(email);
+    return;
+  }
+
   const editorContainer = document.getElementById('workspaceDraftEditor');
   editorContainer.classList.remove('hidden');
+
+  scrollWorkspaceToDraftEditor();
+
+  // Hide the triggering AI Suggestion button container in the email detail pane to avoid double suggestion indicators
+  const btnContainer = document.getElementById('triggerAiSuggestionBtnContainer');
+  if (btnContainer) btnContainer.style.display = 'none';
 
   const draftTextarea = document.getElementById('draftTextArea');
   const draftStatusBadge = document.getElementById('draftStatusBadge');
   const draftTimestamp = document.getElementById('draftTimestamp');
   const retryStatusText = document.getElementById('retryStatusText');
   const toneChips = document.querySelectorAll('.tone-chip');
+  setToneChipsDisabled(false);
 
   // Check if draft already exists in our local store
   let draft = STATE.drafts.find(d => d.emailId === emailId);
@@ -398,7 +560,8 @@ async function renderDraftArea(emailId) {
     try {
       const res = await fetch(`/api/drafts/${emailId}`);
       if (!res.ok) {
-        throw new Error('Draft not found or generation failed');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Draft not found or generation failed');
       }
       draft = await res.json();
       
@@ -406,7 +569,7 @@ async function renderDraftArea(emailId) {
       const draftsRes = await fetch('/api/drafts');
       STATE.drafts = await draftsRes.json();
     } catch (err) {
-      showToast('Failed to generate AI draft reply', 'error');
+      showToast(err.message || 'Failed to generate AI draft reply', 'error');
       document.querySelector('.draft-editor-container').classList.remove('generating');
       return;
     } finally {
@@ -572,6 +735,31 @@ function renderLogsTable() {
 // ----------------------------------------------------
 
 function setupEventListeners() {
+  // Folder Switcher Tab Clicks
+  const folderBtns = document.querySelectorAll('.folder-btn');
+  folderBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const folder = btn.getAttribute('data-folder');
+      if (folder === STATE.currentFolder) return;
+
+      folderBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      STATE.currentFolder = folder;
+
+      showToast(`Loading folder: ${folder.toUpperCase()}...`, 'info');
+      
+      // Fetch and render emails matching this folder
+      await fetchEmails();
+
+      // Automatically select the first email in the newly opened folder
+      if (STATE.emails.length > 0) {
+        selectEmail(STATE.emails[0].id);
+      } else {
+        renderEmptyWorkspace();
+      }
+    });
+  });
+
   // Sync Inbox Button Click
   const syncBtn = document.getElementById('syncInboxBtn');
   syncBtn.addEventListener('click', async () => {
@@ -604,10 +792,27 @@ function setupEventListeners() {
     }
   });
 
+  // Close AI Suggestion Panel Click
+  const closeDraftBtn = document.getElementById('closeDraftBtn');
+  if (closeDraftBtn) {
+    closeDraftBtn.addEventListener('click', () => {
+      const editorContainer = document.getElementById('workspaceDraftEditor');
+      if (editorContainer) {
+        editorContainer.classList.add('hidden');
+        showToast('AI suggestion panel collapsed.', 'info');
+
+        // Show the triggering action button container again so they can re-open it
+        const btnContainer = document.getElementById('triggerAiSuggestionBtnContainer');
+        if (btnContainer) btnContainer.style.display = 'flex';
+      }
+    });
+  }
+
   // Switch Tone Chip Clicks
   const chips = document.querySelectorAll('.tone-chip');
   chips.forEach(chip => {
     chip.addEventListener('click', async () => {
+      if (chip.disabled) return;
       const tone = chip.getAttribute('data-tone');
       if (tone === STATE.activeTone) return;
 
@@ -626,6 +831,10 @@ function setupEventListeners() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tone })
         });
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Tone switcher regeneration failed');
+        }
         
         const updatedDraft = await res.json();
         
@@ -642,7 +851,7 @@ function setupEventListeners() {
         
         showToast(`Draft regenerated with ${tone} tone`, 'info');
       } catch (err) {
-        showToast('Tone switcher regeneration failed', 'error');
+        showToast(err.message || 'Tone switcher regeneration failed', 'error');
       } finally {
         document.querySelector('.draft-editor-container').classList.remove('generating');
       }
@@ -696,7 +905,16 @@ function setupEventListeners() {
       const draftsRes = await fetch('/api/drafts');
       STATE.drafts = await draftsRes.json();
 
-      renderDraftArea(STATE.selectedEmailId);
+      // Hide the draft suggestions pane entirely upon discard
+      const editorContainer = document.getElementById('workspaceDraftEditor');
+      if (editorContainer) {
+        editorContainer.classList.add('hidden');
+      }
+
+      // Show the triggering AI Suggestion action button container again
+      const btnContainer = document.getElementById('triggerAiSuggestionBtnContainer');
+      if (btnContainer) btnContainer.style.display = 'flex';
+
       showToast('Draft successfully discarded.', 'info');
       fetchLogs();
     } catch (err) {
@@ -797,34 +1015,12 @@ function setupEventListeners() {
     }
   });
 
-  // Toggle Live/Sandbox inputs inside settings page if form exists
   const configForm = document.getElementById('settingsForm');
   if (configForm) {
-    configForm.addEventListener('change', () => {
-      const modeRadio = document.querySelector('input[name="systemMode"]:checked');
-      const selectedMode = modeRadio ? modeRadio.value : 'Live';
-      const fields = document.getElementById('liveSettingsFields');
-      const header = document.getElementById('liveSettingsHeader');
-      
-      if (fields && header) {
-        if (selectedMode === 'Live') {
-          fields.classList.remove('hidden');
-          header.classList.remove('hidden');
-        } else {
-          fields.classList.add('hidden');
-          header.classList.add('hidden');
-        }
-      }
-    });
-
     // Save Settings Forms
     configForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const modeRadio = document.querySelector('input[name="systemMode"]:checked');
-      const selectedMode = modeRadio ? modeRadio.value : 'Live';
-      
       const payload = {
-        mode: selectedMode,
         clientId: document.getElementById('clientId').value,
         clientSecret: document.getElementById('clientSecret').value,
         geminiApiKey: document.getElementById('geminiApiKey').value
@@ -855,37 +1051,13 @@ function setupEventListeners() {
 
   // Account Connect button clicks
   document.getElementById('connectGmailBtn').addEventListener('click', async () => {
-    if (STATE.config.mode === 'Sandbox') {
-      // MOCK POPUP SIMULATOR FOR SANDBOX FLOW
-      showToast('Opening Google Account Consent Authorization Dialog...', 'info');
-      
-      const authUrlRes = await fetch('/api/auth/url');
-      const authUrlData = await authUrlRes.json();
-
-      const width = 600, height = 700;
-      const left = (window.innerWidth / 2) - (width / 2);
-      const top = (window.innerHeight / 2) - (height / 2);
-      
-      // Simulated window delay
-      const win = window.open(authUrlData.url, 'Google OAuth Authorization', `width=${width},height=${height},left=${left},top=${top}`);
-      
-      const timer = setInterval(async () => {
-        if (win.closed) {
-          clearInterval(timer);
-          await fetchConfig();
-          await fetchLogs();
-        }
-      }, 500);
-    } else {
-      // LIVE REDIRECT FLOW
-      showToast('Redirecting to secure Google Accounts OAuth portal...', 'info');
-      try {
-        const res = await fetch('/api/auth/url');
-        const data = await res.json();
-        window.location.href = data.url;
-      } catch (err) {
-        showToast('Failed to construct Google OAuth2 redirection link', 'error');
-      }
+    showToast('Redirecting to secure Google Accounts OAuth portal...', 'info');
+    try {
+      const res = await fetch('/api/auth/url');
+      const data = await res.json();
+      window.location.href = data.url;
+    } catch (err) {
+      showToast('Failed to construct Google OAuth2 redirection link', 'error');
     }
   });
 
@@ -910,27 +1082,14 @@ function setupEventListeners() {
   const prefForm = document.getElementById('preferencesForm');
   
   // Load initial preferences
-  fetch('/api/config')
-    .then(() => fetch('/api/emails')) // Chain dummy fetch to ensure DB is initialized
-    .then(() => {
-      // Quick preferences fetch
-      fetch('/api/style/profile')
-        .then(() => {
-          // Triggering a read of general Preferences
-          // We read them by querying system log configs or direct reads
-          // To keep it clean, let's load preferences from config get details
-          // But actually we can do a quick load of preferences:
-          // In db Preferences is stored. Let's load the fields:
-          fetch('/api/preferences', { method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) })
-            .then(res => res.json())
-            .then(data => {
-              if (data.preferences) {
-                document.getElementById('defaultTone').value = data.preferences.defaultTone;
-                document.getElementById('customInstructions').value = data.preferences.customInstructions;
-                document.getElementById('signature').value = data.preferences.signature;
-              }
-            });
-        });
+  fetch('/api/preferences')
+    .then(res => res.json())
+    .then(preferences => {
+      if (preferences) {
+        document.getElementById('defaultTone').value = preferences.defaultTone;
+        document.getElementById('customInstructions').value = preferences.customInstructions;
+        document.getElementById('signature').value = preferences.signature;
+      }
     });
 
   prefForm.addEventListener('submit', async (e) => {
@@ -957,6 +1116,58 @@ function setupEventListeners() {
       showToast('Failed to save writing preferences', 'error');
     }
   });
+
+  // Save AI Config Form
+  const aiForm = document.getElementById('aiConfigForm');
+  if (aiForm) {
+    aiForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const payload = {
+        aiProvider: document.getElementById('aiProvider').value,
+        geminiApiKey: document.getElementById('geminiApiKey').value,
+        openaiApiKey: document.getElementById('openaiApiKey').value,
+        anthropicApiKey: document.getElementById('anthropicApiKey').value
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('AI engine and credentials saved successfully.', 'success');
+          await fetchConfig();
+          await fetchLogs();
+        } else {
+          throw new Error(data.error);
+        }
+      } catch (err) {
+        showToast(`Failed to save AI configuration: ${err.message}`, 'error');
+      }
+    });
+  }
+
+  // Handle AI Provider dropdown change to show/hide API key groups dynamically
+  const providerSelect = document.getElementById('aiProvider');
+  if (providerSelect) {
+    const geminiGroup = document.getElementById('geminiKeyGroup');
+    const openaiGroup = document.getElementById('openaiKeyGroup');
+    const anthropicGroup = document.getElementById('anthropicKeyGroup');
+    
+    function toggleKeyGroups() {
+      const val = providerSelect.value;
+      if (geminiGroup) geminiGroup.style.display = val === 'gemini' ? 'block' : 'none';
+      if (openaiGroup) openaiGroup.style.display = val === 'openai' ? 'block' : 'none';
+      if (anthropicGroup) anthropicGroup.style.display = val === 'anthropic' ? 'block' : 'none';
+    }
+    
+    providerSelect.addEventListener('change', toggleKeyGroups);
+    
+    // Trigger it on select value populate
+    setTimeout(toggleKeyGroups, 100);
+  }
 
   // Clear Logs Reload button
   document.getElementById('clearLogsBtn').addEventListener('click', () => {

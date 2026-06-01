@@ -1,63 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database/db');
-const gmailService = require('../services/gmail');
-const mockGmailService = require('../services/mockGmail');
-const aiService = require('../services/ai');
-const styleLearner = require('../services/styleLearner');
-const queue = require('../services/queue');
-const { v4: uuidv4 } = require('uuid');
-
-// UTILITY: Get active services based on config mode
-function getActiveServices() {
-  const creds = db.get('credentials');
-  if (creds.mode === 'Live') {
-    return { gmail: gmailService, aiMode: 'Live' };
-  }
-  return { gmail: mockGmailService, aiMode: 'Sandbox' };
-}
+const db = require('../database/db'); // For raw logs retrieval
+const draftly = require('../services/draftly');
 
 // ----------------------------------------------------
 // 1. CONFIGURATION & CREDENTIALS ENDPOINTS
 // ----------------------------------------------------
 
 router.get('/config', (req, res) => {
-  const creds = db.get('credentials');
-  // Return safe config (no passwords/raw tokens in plain text)
-  res.json({
-    mode: creds.mode,
-    clientId: creds.clientId ? `...${creds.clientId.slice(-6)}` : '',
-    clientSecret: creds.clientSecret ? '********' : '',
-    geminiApiKey: creds.geminiApiKey ? '********' : '',
-    isConnected: creds.isConnected,
-    userEmail: creds.userEmail
-  });
+  try {
+    const status = draftly.connectivity.getStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/config', async (req, res) => {
   try {
-    const { clientId, clientSecret, geminiApiKey } = req.body;
-    const creds = db.get('credentials');
-    
-    // Log configuration changes
-    await db.log('System', 'Info', 'Updating system configuration.');
-
-    creds.mode = 'Live'; // Permanently locked in Live Mode
-    
-    if (clientId !== undefined && !clientId.startsWith('...')) {
-      creds.clientId = clientId;
-    }
-    if (clientSecret !== undefined && clientSecret !== '********') {
-      creds.clientSecret = clientSecret;
-    }
-    if (geminiApiKey !== undefined && geminiApiKey !== '********') {
-      creds.geminiApiKey = geminiApiKey;
-    }
-
-    await db.saveEncryptedCredentials(creds);
-    res.json({ success: true, message: 'Settings saved successfully.' });
+    const status = await draftly.connectivity.saveConfig(req.body);
+    res.json({ success: true, message: 'Settings saved successfully.', config: status });
   } catch (err) {
-    await db.log('System', 'Error', 'Failed to save configuration: ' + err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -68,8 +31,7 @@ router.post('/config', async (req, res) => {
 
 router.get('/auth/url', (req, res) => {
   try {
-    const { gmail } = getActiveServices();
-    const url = gmail.getAuthUrl();
+    const url = draftly.connectivity.getAuthUrl();
     res.json({ url });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -82,22 +44,16 @@ router.get('/auth/callback', async (req, res) => {
     if (!code) {
       return res.status(400).send('Authorization code is missing.');
     }
-
-    const { gmail } = getActiveServices();
-    const creds = await gmail.handleCallback(code);
-
-    // After connecting, redirect back to dashboard
+    await draftly.connectivity.handleCallback(code);
     res.redirect('/');
   } catch (err) {
-    await db.log('System', 'Error', 'OAuth2 callback authentication failed: ' + err.message);
     res.status(500).send(`Authentication failed: ${err.message}`);
   }
 });
 
 router.post('/auth/logout', async (req, res) => {
   try {
-    const { gmail } = getActiveServices();
-    await gmail.revokeToken();
+    await draftly.connectivity.disconnect();
     res.json({ success: true, message: 'Successfully logged out.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -108,216 +64,83 @@ router.post('/auth/logout', async (req, res) => {
 // 3. EMAILS & DRAFTS MANAGEMENT ENDPOINTS
 // ----------------------------------------------------
 
-// Fetch all fetched inbox emails
-// Fetch all fetched inbox emails (automatically sync in Live Mode on GET)
 router.get('/emails', async (req, res) => {
   try {
-    const creds = db.get('credentials');
-    if (creds.isConnected) {
-      await gmailService.syncEmails();
-    }
+    const { folder } = req.query;
+    const emails = await draftly.inbox.list(folder);
+    res.json(emails);
   } catch (err) {
-    await db.log('Gmail', 'Error', 'Auto-sync on page load failed: ' + err.message);
-  }
-  const emails = db.findAll('emails');
-  // Sort by timestamp descending (newest first)
-  const sorted = [...emails].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  res.json(sorted);
-});
-
-// Trigger synchronization of inbox
-router.post('/emails/sync', async (req, res) => {
-  try {
-    const { gmail } = getActiveServices();
-    const synced = await gmail.syncEmails();
-    
-    // Automatically pre-generate drafts in the background for any *unread* email that does not have a draft!
-    const drafts = db.findAll('drafts');
-    const preferences = db.get('preferences');
-    
-    for (const email of synced) {
-      const hasDraft = drafts.some(d => d.emailId === email.id);
-      if (!hasDraft && !email.isRead) {
-        // Run draft generation asynchronously (non-blocking)
-        aiService.generateDraft(email, preferences.defaultTone).then(async (content) => {
-          await db.insert('drafts', {
-            id: 'draft-' + uuidv4().substring(0, 8),
-            emailId: email.id,
-            threadId: email.threadId,
-            content,
-            tone: preferences.defaultTone,
-            status: 'Suggested',
-            retryCount: 0,
-            errorLog: '',
-            createdAt: new Date().toISOString()
-          });
-        }).catch(err => {
-          console.error(`Pre-generation failed for email ${email.id}:`, err);
-        });
-      }
-    }
-
-    res.json({ success: true, count: synced.length });
-  } catch (err) {
-    await db.log('Gmail', 'Error', 'Failed to synchronize inbox: ' + err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Fetch all drafts
-router.get('/drafts', (req, res) => {
-  const drafts = db.findAll('drafts');
-  res.json(drafts);
+router.post('/emails/sync', async (req, res) => {
+  try {
+    const synced = await draftly.inbox.sync();
+    res.json({ success: true, count: synced.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Fetch or generate a draft for a specific email
+router.get('/drafts', async (req, res) => {
+  try {
+    const drafts = await draftly.inbox.listDrafts();
+    res.json(drafts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/drafts/:emailId', async (req, res) => {
   try {
     const { emailId } = req.params;
-    const email = db.findById('emails', emailId);
-    
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found.' });
-    }
-
-    let draft = db.findOne('drafts', { emailId });
-    
-    if (!draft) {
-      const preferences = db.get('preferences');
-      const content = await aiService.generateDraft(email, preferences.defaultTone);
-      
-      draft = {
-        id: 'draft-' + uuidv4().substring(0, 8),
-        emailId,
-        threadId: email.threadId,
-        content,
-        tone: preferences.defaultTone,
-        status: 'Suggested',
-        retryCount: 0,
-        errorLog: '',
-        createdAt: new Date().toISOString()
-      };
-      
-      await db.insert('drafts', draft);
-    }
-
+    const draft = await draftly.inbox.getDraftForEmail(emailId);
     res.json(draft);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.message.includes('not found') ? 404 : 400).json({ error: err.message });
   }
 });
 
-// Regenerate a draft with a different tone/instructions
 router.post('/drafts/:emailId/regenerate', async (req, res) => {
   try {
     const { emailId } = req.params;
     const { tone } = req.body;
-    const email = db.findById('emails', emailId);
-
-    if (!email) {
-      return res.status(404).json({ error: 'Email not found.' });
-    }
-
-    const content = await aiService.generateDraft(email, tone);
-    
-    let draft = db.findOne('drafts', { emailId });
-    if (draft) {
-      draft = await db.updateById('drafts', draft.id, {
-        content,
-        tone,
-        status: 'Suggested', // Reset status if edited/rejected before
-        errorLog: ''
-      });
-    } else {
-      draft = {
-        id: 'draft-' + uuidv4().substring(0, 8),
-        emailId,
-        threadId: email.threadId,
-        content,
-        tone,
-        status: 'Suggested',
-        retryCount: 0,
-        errorLog: '',
-        createdAt: new Date().toISOString()
-      };
-      await db.insert('drafts', draft);
-    }
-
+    const draft = await draftly.inbox.regenerateDraft(emailId, tone);
     res.json(draft);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.message.includes('not found') ? 404 : 400).json({ error: err.message });
   }
 });
 
-// Save manual draft edits
 router.put('/drafts/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { content } = req.body;
-    
-    const draft = db.findById('drafts', id);
-    if (!draft) {
-      return res.status(404).json({ error: 'Draft not found.' });
-    }
-
-    const updated = await db.updateById('drafts', id, {
-      content,
-      status: 'Edited' // Update state to reflect manual tuning
-    });
-
-    await db.log('System', 'Info', `Draft ${id} manually modified by user.`);
+    const updated = await draftly.inbox.updateDraft(id, content);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.message.includes('not found') ? 404 : 500).json({ error: err.message });
   }
 });
 
-// Approve a draft (puts in queue for sending)
 router.post('/drafts/:id/approve', async (req, res) => {
   try {
     const { id } = req.params;
-    const draft = db.findById('drafts', id);
-
-    if (!draft) {
-      return res.status(404).json({ error: 'Draft not found.' });
-    }
-
-    await db.log('System', 'Info', `User approved Draft ${id}. Enqueueing message...`);
-    
-    // Update status to Approved
-    const updated = await db.updateById('drafts', id, {
-      status: 'Approved',
-      errorLog: ''
-    });
-
-    // Run processing cycle immediately (non-blocking background task)
-    queue.processQueue();
-
+    const updated = await draftly.inbox.approveDraft(id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.message.includes('not found') ? 404 : 500).json({ error: err.message });
   }
 });
 
-// Reject a draft (archive/dismiss it)
 router.post('/drafts/:id/reject', async (req, res) => {
   try {
     const { id } = req.params;
-    const draft = db.findById('drafts', id);
-
-    if (!draft) {
-      return res.status(404).json({ error: 'Draft not found.' });
-    }
-
-    await db.log('System', 'Info', `User rejected Draft ${id}. Archiving draft.`);
-    
-    const updated = await db.updateById('drafts', id, {
-      status: 'Rejected'
-    });
-
+    const updated = await draftly.inbox.rejectDraft(id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.message.includes('not found') ? 404 : 500).json({ error: err.message });
   }
 });
 
@@ -326,30 +149,35 @@ router.post('/drafts/:id/reject', async (req, res) => {
 // ----------------------------------------------------
 
 router.get('/style/profile', (req, res) => {
-  const preferences = db.get('preferences');
-  res.json(preferences.styleProfile);
-});
-
-router.post('/style/learn', async (req, res) => {
   try {
-    const profile = await styleLearner.learnFromLiveSentEmails();
+    const profile = draftly.profile.getStyleProfile();
     res.json(profile);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Save general preferences
-router.post('/preferences', (req, res) => {
+router.post('/style/learn', async (req, res) => {
   try {
-    const { defaultTone, signature, customInstructions } = req.body;
-    const preferences = db.get('preferences');
-    
-    if (defaultTone) preferences.defaultTone = defaultTone;
-    if (signature !== undefined) preferences.signature = signature;
-    if (customInstructions !== undefined) preferences.customInstructions = customInstructions;
+    const profile = await draftly.profile.learnStyle();
+    res.json(profile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    db.set('preferences', preferences);
+router.get('/preferences', (req, res) => {
+  try {
+    const preferences = draftly.profile.getPreferences();
+    res.json(preferences);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/preferences', async (req, res) => {
+  try {
+    const preferences = await draftly.profile.savePreferences(req.body);
     res.json({ success: true, preferences });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -361,10 +189,13 @@ router.post('/preferences', (req, res) => {
 // ----------------------------------------------------
 
 router.get('/logs', (req, res) => {
-  const logs = db.findAll('logs');
-  // Sort descending to show newest first in the feed
-  const sortedLogs = [...logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  res.json(sortedLogs.slice(0, 100)); // limit to 100
+  try {
+    const logs = db.findAll('logs');
+    const sortedLogs = [...logs].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    res.json(sortedLogs.slice(0, 100)); // limit to 100
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;

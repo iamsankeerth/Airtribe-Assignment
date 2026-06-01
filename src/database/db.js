@@ -20,10 +20,12 @@ const DEFAULTS = {
     }
   },
   credentials: {
-    mode: 'Live', // 'Sandbox' or 'Live'
     clientId: '',
     clientSecret: '',
     geminiApiKey: '',
+    openaiApiKey: '',
+    anthropicApiKey: '',
+    aiProvider: 'gemini',
     accessToken: '', // encrypted
     refreshToken: '', // encrypted
     tokenExpiry: 0,
@@ -38,7 +40,7 @@ const DEFAULTS = {
       timestamp: new Date(Date.now() - 3600000 * 25).toISOString(),
       category: 'System',
       severity: 'Info',
-      message: 'Draftly Application initialized in Sandbox Mode.'
+      message: 'Draftly application initialized in live Gmail mode.'
     }
   ]
 };
@@ -47,6 +49,79 @@ class JSONDatabase {
   constructor() {
     this.data = {};
     this.isLoaded = false;
+  }
+
+  reconcileLegacyDraftSignatures() {
+    const drafts = this.data.drafts;
+    if (!Array.isArray(drafts) || drafts.length === 0) return;
+
+    let changed = false;
+
+    for (const draft of drafts) {
+      if (typeof draft.content === 'string' && draft.content.includes('Demo User')) {
+        draft.content = draft.content.replace(/Demo User/g, 'Sankeerth Masetty');
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  reconcileGoogleOAuthCredentials() {
+    const creds = this.data.credentials;
+    if (!creds) return;
+
+    const likelyWrongSecret =
+      !creds.clientSecret ||
+      creds.clientSecret.startsWith('AIza');
+
+    if (!likelyWrongSecret) return;
+
+    const projectRoot = path.join(__dirname, '..', '..');
+    const secretFile = fs
+      .readdirSync(projectRoot)
+      .find(name => /^client_secret_.*\.json$/i.test(name));
+
+    if (!secretFile) return;
+
+    try {
+      const secretPath = path.join(projectRoot, secretFile);
+      const parsed = JSON.parse(fs.readFileSync(secretPath, 'utf8'));
+      const webCreds = parsed.web;
+
+      if (webCreds && webCreds.client_id && webCreds.client_secret) {
+        creds.clientId = webCreds.client_id;
+        creds.clientSecret = webCreds.client_secret;
+      }
+    } catch (err) {
+      console.error('Failed to reconcile Google OAuth credentials from client secret file:', err.message);
+    }
+  }
+
+  reconcileLegacyEmailFolders() {
+    const emails = this.data.emails;
+    if (!Array.isArray(emails) || emails.length === 0) return false;
+
+    const creds = this.data.credentials || {};
+    const userEmail = (creds.userEmail || 'sankeerthmvsr@gmail.com').toLowerCase().trim();
+
+    let changed = false;
+
+    for (const email of emails) {
+      if (email.folder === undefined) {
+        const sender = (email.sender || '').toLowerCase();
+        
+        // Check if sender is the logged in user
+        if (sender.includes(userEmail)) {
+          email.folder = 'sent';
+        } else {
+          email.folder = 'inbox';
+        }
+        changed = true;
+      }
+    }
+
+    return changed;
   }
 
   init() {
@@ -68,6 +143,13 @@ class JSONDatabase {
             this.data[key] = JSON.parse(JSON.stringify(DEFAULTS[key]));
           }
         }
+        this.reconcileGoogleOAuthCredentials();
+        this.reconcileLegacyDraftSignatures();
+        this.reconcileLegacyEmailFolders();
+        if (this.data.credentials && 'mode' in this.data.credentials) {
+          delete this.data.credentials.mode;
+        }
+        this.saveSync();
         this.isLoaded = true;
       } catch (err) {
         console.error('Error reading JSON database, resetting to defaults:', err);
@@ -80,6 +162,7 @@ class JSONDatabase {
 
   resetToDefaults() {
     this.data = JSON.parse(JSON.stringify(DEFAULTS));
+    this.reconcileGoogleOAuthCredentials();
     this.saveSync();
     this.isLoaded = true;
   }

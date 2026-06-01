@@ -2,105 +2,125 @@ const db = require('../database/db');
 const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-// Rich pre-populated mock sent emails for sandbox training
-const MOCK_SENT_EMAILS = [
-  "Hi Marcus, thanks for the ping. Let me know what works best for a call. Cheers, Demo User",
-  "Dear Dr. Watson, I have reviewed the speaker agreements. Everything looks fine. I will send over the slides by next Wednesday. Best regards, Demo User",
-  "Hey David, super down for coffee! Wednesday at 1 PM works great. Let me know if that spot on 4th street is cool. Cheers, Demo User",
-  "Hello Team, quick update: I have deployed the fix for the database connection pool. Let's monitor response times. Cheers, Demo User",
-  "Hi Sarah, thanks for reaching out. Yes, I'm available this Thursday at 3 PM. Let me know what link you want to use. Best, Demo User"
-];
-
 class StyleLearnerService {
-  
-  // Simulate analyzing sent emails in Sandbox Mode
-  async learnFromMockSentEmails() {
-    await db.log('System', 'Info', 'Initiating sent email analysis in Sandbox Mode...');
-    
-    // Simulate training cycles / AI analysis steps
-    await new Promise(resolve => setTimeout(resolve, 800));
-    await db.log('System', 'Info', 'Scanning local outbox (found 5 historical replies)...');
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await db.log('System', 'Info', 'Extracting stylistic markers: Tone mapping, salutations, structures...');
-    
-    const profile = {
-      toneDistribution: { formal: 20, friendly: 60, concise: 20 },
-      sentenceLength: 'short to moderate (avg. 10 words)',
-      signatureStyle: "Friendly and brief, prepended with 'Cheers' or 'Best'",
-      commonPhrases: ['thanks for the ping', 'Let me know what works', 'Cheers', 'super down'],
-      analysisTimestamp: new Date().toISOString(),
-      summary: 'Learned profile from Sandbox: The user prefers warm, friendly, and action-oriented responses. Openings are highly casual ("Hey", "Hi") and endings consistently use "Cheers" or "Best" before the signature. Sentences are generally short, direct, and rarely exceed 15 words.'
-    };
+  buildHeuristicProfile(samples) {
+    const joined = samples.join('\n');
+    const words = joined
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean);
+    const sentenceCount = Math.max(
+      1,
+      samples.reduce((count, sample) => count + (sample.match(/[.!?]+/g) || []).length, 0)
+    );
+    const avgWords = Math.max(1, Math.round(words.length / sentenceCount));
 
-    const preferences = db.get('preferences');
-    preferences.styleProfile = profile;
-    db.set('preferences', preferences);
-    
-    await db.log('System', 'Info', 'Successfully compiled and updated Sandbox Writing Style Profile.');
-    return profile;
+    const knownPhrases = [
+      'Thanks',
+      'Thank you',
+      'Best',
+      'Regards',
+      'Cheers',
+      'Let me know',
+      'Happy to',
+      'Appreciate'
+    ];
+    const commonPhrases = knownPhrases.filter(phrase =>
+      new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(joined)
+    );
+
+    const greetings = samples.filter(sample => /^(hi|hello|hey|dear)\b/i.test(sample.trim())).length;
+    const exclamations = samples.filter(sample => sample.includes('!')).length;
+    const friendly = Math.max(10, Math.min(80, Math.round(((greetings + exclamations) / (samples.length * 2)) * 100)));
+    const formal = Math.max(
+      10,
+      Math.min(70, Math.round((samples.filter(sample => /^dear\b/i.test(sample.trim())).length / samples.length) * 100 + 20))
+    );
+    const concise = Math.max(10, Math.min(70, 100 - Math.round(avgWords * 2)));
+    const signoff = commonPhrases.find(phrase => /best|regards|cheers/i.test(phrase));
+
+    return {
+      toneDistribution: {
+        formal,
+        friendly,
+        concise
+      },
+      sentenceLength: avgWords <= 10 ? 'short' : avgWords <= 18 ? 'moderate' : 'long',
+      signatureStyle: signoff
+        ? `Usually signs off with "${signoff}".`
+        : 'Varies by recipient; no strong repeated sign-off detected.',
+      commonPhrases: commonPhrases.slice(0, 5),
+      summary: `Derived from ${samples.length} sent emails. The user tends to write ${avgWords <= 10 ? 'brief' : avgWords <= 18 ? 'balanced' : 'detailed'} replies with ${greetings > 0 ? 'clear greetings' : 'minimal greeting ritual'} and ${commonPhrases.length ? 'repeatable phrasing patterns' : 'light variation across replies'}.`,
+      analysisTimestamp: new Date().toISOString()
+    };
   }
 
-  // Live Mode style analyzer using Gemini
-  async learnFromLiveSentEmails() {
+  async fetchSentEmailBodies() {
+    const gmailService = require('./gmail');
+    const authClient = await gmailService.getAuthenticatedClient();
+    const gmail = google.gmail({ version: 'v1', auth: authClient });
+
+    await db.log('Gmail', 'Info', 'Fetching user\'s last 10 sent emails...');
+
+    const listRes = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'from:me',
+      maxResults: 10
+    });
+
+    const messages = listRes.data.messages || [];
+    if (messages.length === 0) {
+      throw new Error('No sent emails found in Gmail outbox to analyze.');
+    }
+
+    const bodies = [];
+    for (const msg of messages) {
+      try {
+        const detail = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'full'
+        });
+        const body = gmailService.parseBody(detail.data.payload);
+        if (body && body.trim().length > 10) {
+          const rawBody = body.split('\nOn ')[0].split('-----Original Message-----')[0].trim();
+          bodies.push(rawBody);
+        }
+      } catch (err) {
+        await db.log('Gmail', 'Warning', `Skipping sent message ${msg.id}: ${err.message}`);
+      }
+    }
+
+    if (!bodies.length) {
+      throw new Error('Could not extract valid text bodies from sent emails.');
+    }
+
+    return bodies;
+  }
+
+  async learnFromSentEmails() {
     const creds = db.get('credentials');
     const preferences = db.get('preferences');
 
-    if (creds.mode === 'Sandbox' || !creds.geminiApiKey) {
-      return this.learnFromMockSentEmails();
-    }
+    await db.log('System', 'Info', 'Starting Gmail sent-mail analysis...');
 
-    await db.log('System', 'Info', 'Starting live Gmail sent outbox analysis...');
-    
     try {
-      const { google } = require('googleapis');
-      const gmailService = require('./gmail');
-      const authClient = await gmailService.getAuthenticatedClient();
-      const gmail = google.gmail({ version: 'v1', auth: authClient });
-
-      await db.log('Gmail', 'Info', 'Fetching user\'s last 10 sent emails...');
-      
-      const listRes = await gmail.users.messages.list({
-        userId: 'me',
-        q: 'from:me',
-        maxResults: 10
-      });
-
-      const messages = listRes.data.messages || [];
-      if (messages.length === 0) {
-        await db.log('System', 'Warning', 'No sent emails found in Gmail outbox to analyze. Falling back to sandbox corpus.');
-        return this.learnFromMockSentEmails();
-      }
-
-      const bodies = [];
-      for (const msg of messages) {
-        try {
-          const detail = await gmail.users.messages.get({
-            userId: 'me',
-            id: msg.id,
-            format: 'full'
-          });
-          const body = gmailService.parseBody(detail.data.payload);
-          if (body && body.trim().length > 10) {
-            // Strip out long previous quotes if any, just keep the user's raw message
-            const rawBody = body.split('\nOn ')[0].split('-----Original Message-----')[0].trim();
-            bodies.push(rawBody);
-          }
-        } catch (err) {
-          // Ignore individual fetch errors
-        }
-      }
-
+      const bodies = await this.fetchSentEmailBodies();
       const corpus = bodies.join('\n\n--- NEXT SENT EMAIL ---\n\n');
-      if (!corpus.trim()) {
-        await db.log('System', 'Warning', 'Could not extract valid text bodies from sent emails. Using sandbox profile fallback.');
-        return this.learnFromMockSentEmails();
+
+      if (!creds.geminiApiKey) {
+        await db.log('AI', 'Warning', 'Gemini API key is missing. Building style profile with local heuristics.');
+        const profile = this.buildHeuristicProfile(bodies);
+        preferences.styleProfile = profile;
+        db.set('preferences', preferences);
+        return profile;
       }
 
       await db.log('AI', 'Info', `Sending sent email corpus (${bodies.length} messages) to Gemini for writing style extraction...`);
-      
+
       const genAI = new GoogleGenerativeAI(creds.geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
       const prompt = `
 You are a stylistic linguistic expert. Analyze the following collection of sent emails written by a single user.
@@ -124,8 +144,7 @@ Schema:
 
       const result = await model.generateContent(prompt);
       let text = result.response.text().trim();
-      
-      // Clean up potential markdown JSON block formatting if outputted by LLM
+
       if (text.startsWith('```')) {
         text = text.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '').trim();
       }
@@ -135,20 +154,18 @@ Schema:
         profile = JSON.parse(text);
         profile.analysisTimestamp = new Date().toISOString();
       } catch (jsonErr) {
-        await db.log('AI', 'Warning', 'Failed to parse Gemini style profile JSON. Re-formatting to fallback.');
-        // If parsing fails, fall back to safe parsing or sandbox profile
+        await db.log('AI', 'Warning', 'Failed to parse Gemini style profile JSON.');
         throw new Error('Invalid JSON returned by LLM');
       }
 
       preferences.styleProfile = profile;
       db.set('preferences', preferences);
 
-      await db.log('System', 'Info', 'Live Writing Style Profile compiled successfully from actual sent emails.');
+      await db.log('System', 'Info', 'Writing style profile compiled successfully from sent emails.');
       return profile;
-
     } catch (err) {
-      await db.log('System', 'Error', `Failed to construct Live Style Profile: ${err.message}. Using Sandbox simulation.`);
-      return this.learnFromMockSentEmails();
+      await db.log('System', 'Error', `Failed to construct writing style profile: ${err.message}`);
+      throw err;
     }
   }
 }

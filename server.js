@@ -37,7 +37,6 @@ const server = app.listen(PORT, () => {
   console.log(`==================================================`);
   console.log(`   DRAFTLY BACKEND IS RUNNING LOCALLY!`);
   console.log(`   URL: http://localhost:${PORT}`);
-  console.log(`   Mode: ${db.get('credentials').mode} Mode`);
   console.log(`==================================================`);
 });
 

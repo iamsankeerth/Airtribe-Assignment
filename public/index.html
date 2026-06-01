@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- Premium Stylesheets -->
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=2.2.2">
 </head>
 <body>
   <!-- Dynamic Background Mesh -->
@@ -36,11 +36,6 @@
       </div>
 
       <div class="header-controls">
-        <div class="mode-badge hidden" id="systemModeBadge" style="display: none !important;">
-          <span class="pulse-indicator status-sandbox"></span>
-          <span class="badge-text">Sandbox Mode</span>
-        </div>
-
         <button class="btn btn-primary" id="syncInboxBtn">
           <i class="fa-solid fa-rotate"></i>
           <span>Sync Inbox</span>
@@ -84,6 +79,23 @@
               <h2>Recent Emails</h2>
               <span class="count-badge" id="emailCount">0</span>
             </div>
+            
+            <!-- Folder Navigation Row -->
+            <div class="folder-navigation">
+              <button class="folder-btn active" data-folder="inbox" id="folder-inbox">
+                <i class="fa-solid fa-inbox"></i> Inbox
+              </button>
+              <button class="folder-btn" data-folder="sent" id="folder-sent">
+                <i class="fa-solid fa-paper-plane"></i> Sent
+              </button>
+              <button class="folder-btn" data-folder="spam" id="folder-spam">
+                <i class="fa-solid fa-triangle-exclamation"></i> Spam
+              </button>
+              <button class="folder-btn" data-folder="all" id="folder-all">
+                <i class="fa-solid fa-envelope"></i> All
+              </button>
+            </div>
+
             <div class="email-list" id="emailListContainer">
               <!-- Loading Skeleton -->
               <div class="list-skeleton">
@@ -114,15 +126,22 @@
                     <h3>AI Suggestion</h3>
                   </div>
                   
-                  <!-- Tone Selector Chips -->
-                  <div class="tone-selector">
-                    <span class="selector-label">Tone:</span>
-                    <div class="tone-chips" id="toneChipsContainer">
-                      <button class="tone-chip active" data-tone="Concise">Concise</button>
-                      <button class="tone-chip" data-tone="Friendly">Friendly</button>
-                      <button class="tone-chip" data-tone="Formal">Formal</button>
-                      <button class="tone-chip" data-tone="Custom">Custom</button>
+                  <div style="display: flex; align-items: center; gap: 1.25rem;">
+                    <!-- Tone Selector Chips -->
+                    <div class="tone-selector">
+                      <span class="selector-label">Tone:</span>
+                      <div class="tone-chips" id="toneChipsContainer">
+                        <button class="tone-chip active" data-tone="Concise">Concise</button>
+                        <button class="tone-chip" data-tone="Friendly">Friendly</button>
+                        <button class="tone-chip" data-tone="Formal">Formal</button>
+                        <button class="tone-chip" data-tone="Custom">Custom</button>
+                      </div>
                     </div>
+
+                    <!-- Close Suggestion Panel Option -->
+                    <button class="btn-close-suggestion" id="closeDraftBtn" title="Close Suggestion Panel">
+                      <i class="fa-solid fa-xmark"></i>
+                    </button>
                   </div>
                 </div>
 
@@ -257,6 +276,47 @@
             </div>
           </div>
 
+          <!-- AI Model Provider & Keys Configuration Card -->
+          <div class="settings-card">
+            <h2>AI Model Provider & Keys</h2>
+            <p class="card-subtitle">Select your active AI text generation provider and save secure API keys.</p>
+
+            <form id="aiConfigForm" class="settings-form">
+              <div class="form-group">
+                <label for="aiProvider">Active AI Provider</label>
+                <select id="aiProvider" class="form-select">
+                  <option value="gemini">Google Gemini (Model: gemini-2.5-flash)</option>
+                  <option value="openai">OpenAI (Model: gpt-4o-mini)</option>
+                  <option value="anthropic">Anthropic Claude (Model: claude-3-5-haiku)</option>
+                </select>
+              </div>
+
+              <!-- Gemini API Key Group -->
+              <div class="form-group" id="geminiKeyGroup">
+                <label for="geminiApiKey">Google Gemini API Key</label>
+                <input type="password" id="geminiApiKey" class="form-input" placeholder="Enter your Gemini API key (AIza...)">
+              </div>
+
+              <!-- OpenAI API Key Group -->
+              <div class="form-group" id="openaiKeyGroup">
+                <label for="openaiApiKey">OpenAI API Key</label>
+                <input type="password" id="openaiApiKey" class="form-input" placeholder="Enter your OpenAI API key (sk-...)">
+              </div>
+
+              <!-- Anthropic API Key Group -->
+              <div class="form-group" id="anthropicKeyGroup">
+                <label for="anthropicApiKey">Anthropic Claude API Key</label>
+                <input type="password" id="anthropicApiKey" class="form-input" placeholder="Enter your Anthropic API key (sk-ant-...)">
+              </div>
+
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary" id="saveAiConfigBtn">
+                  <i class="fa-solid fa-floppy-disk"></i> Save AI Engine Settings
+                </button>
+              </div>
+            </form>
+          </div>
+
           <!-- Preferences Card -->
           <div class="settings-card">
             <h2>Writing Preferences</h2>
@@ -280,7 +340,7 @@
 
               <div class="form-group">
                 <label for="signature">Email Signature</label>
-                <input type="text" id="signature" placeholder="e.g. Best regards, Demo User | CEO, SaaS Corp">
+                <input type="text" id="signature" placeholder="e.g. Best regards, Sankeerth Masetty | CEO, SaaS Corp">
               </div>
 
               <div class="form-actions">
@@ -335,6 +395,6 @@
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- Load client application logic -->
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=2.2.2"></script>
 </body>
 </html>
