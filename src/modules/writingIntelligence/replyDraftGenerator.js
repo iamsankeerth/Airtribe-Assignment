@@ -10,7 +10,49 @@ const openaiProvider = require('./providers/openai');
 const anthropicProvider = require('./providers/anthropic');
 const geminiProvider = require('./providers/gemini');
 
+const TONE_INSTRUCTIONS = {
+  Concise: {
+    summary: 'Write a short, direct, professional reply.',
+    styleRules: [
+      'Keep the reply to 3 to 6 sentences unless the thread clearly requires more detail.',
+      'Prefer short sentences and fast readability over warmth or flourish.',
+      'Acknowledge the sender and respond to the main ask without extra commentary.',
+      'If information is missing, ask at most one crisp clarifying question.'
+    ]
+  },
+  Friendly: {
+    summary: 'Write a warm, natural, human reply.',
+    styleRules: [
+      'Sound approachable and positive while staying professional.',
+      'Use conversational wording and smooth transitions instead of terse phrasing.',
+      'Acknowledge the sender clearly so the message feels thoughtful and personal.',
+      'If information is missing, ask politely for it in a helpful tone.'
+    ]
+  },
+  Formal: {
+    summary: 'Write a polished, respectful, businesslike reply.',
+    styleRules: [
+      'Use complete sentences and precise professional wording.',
+      'Favor clarity, structure, and credibility over conversational tone.',
+      'Avoid casual phrases, slang, or overly warm phrasing.',
+      'If information is missing, request it clearly and formally.'
+    ]
+  },
+  Custom: {
+    summary: 'Follow the user\'s custom writing guidance while staying grounded in the thread.',
+    styleRules: [
+      'Prioritize the user\'s saved custom instructions over the default tone patterns.',
+      'Keep the reply professional and fact-bound even if the user prefers a distinctive style.',
+      'If context is thin, ask for missing information instead of inventing details.',
+      'Use the signature and learned style only after satisfying factual accuracy.'
+    ]
+  }
+};
+
 function buildDraftPrompt(email, tone, preferences, styleProfile, threadHistoryPrompt) {
+  const toneInstruction = TONE_INSTRUCTIONS[tone] || TONE_INSTRUCTIONS.Concise;
+  const toneRules = toneInstruction.styleRules.map(rule => `- ${rule}`).join('\n');
+
   return `You are Draftly, an AI assistant that drafts email replies for a Gmail user.
 
 Your job:
@@ -37,13 +79,11 @@ Learned writing style:
 - Common phrases to mimic when appropriate: ${JSON.stringify(styleProfile.commonPhrases || [])}
 - Preferred sentence length: ${styleProfile.sentenceLength || 'moderate'}
 
-Requested tone:
-- ${tone}
-Interpret tone like this:
-- Concise: short, direct, professional
-- Friendly: warm, natural, human
-- Formal: respectful, polished, businesslike
-- Custom: follow the user's custom instructions while staying grounded in the thread
+Tone mode:
+- Selected tone: ${tone}
+- Tone objective: ${toneInstruction.summary}
+Tone-specific writing rules:
+${toneRules}
 
 Thread history (oldest first):
 ${threadHistoryPrompt}
@@ -129,5 +169,6 @@ async function generateReplyDraft({ email, tone = 'Concise' }) {
 }
 
 module.exports = {
-  generateReplyDraft
+  generateReplyDraft,
+  buildDraftPrompt
 };

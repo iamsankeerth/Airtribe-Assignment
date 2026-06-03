@@ -18,6 +18,7 @@ let profilePreferences;
 let sentEmailRepo;
 let sendQueue;
 let inboxMailbox;
+let replyDraftGenerator;
 let createApp;
 
 function backupFile(sourcePath, targetPath) {
@@ -60,6 +61,7 @@ test.before(() => {
   replyDraftLifecycle = require('../src/modules/replyDraftLifecycle');
   gmailService = require('../src/services/gmail');
   writingIntelligence = require('../src/modules/writingIntelligence');
+  replyDraftGenerator = require('../src/modules/writingIntelligence/replyDraftGenerator');
   profilePreferences = require('../src/modules/profilePreferences');
   inboxMailbox = require('../src/modules/inboxMailbox');
   ({ sentEmailRepo } = require('../src/database/repositories'));
@@ -96,6 +98,7 @@ test('preferences are encrypted at rest and still readable through the module AP
 
   assert.equal(saved.defaultTone, 'Formal');
 
+  db.saveSync();
   const rawDb = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
   assert.equal(typeof rawDb.preferences, 'string');
   assert.match(rawDb.preferences, /^v2:/);
@@ -212,6 +215,66 @@ test('mailbox sync reuses the active sync pass instead of overlapping Gmail fetc
   } finally {
     gmailService.fetchMailboxFolders = originalFetchMailboxFolders;
   }
+});
+
+test('LLM draft prompts are materially different across Concise, Friendly, and Formal tones', () => {
+  const email = {
+    id: 'email-tone-1',
+    threadId: 'thread-tone-1',
+    sender: 'Recruiter <jobs@example.com>',
+    recipient: 'owner@example.com',
+    subject: 'Interview availability',
+    body: 'Could you share a few times that work for you next week?',
+    snippet: 'Could you share a few times that work for you next week?',
+    timestamp: new Date().toISOString(),
+    folder: 'inbox'
+  };
+
+  const preferences = {
+    customInstructions: 'Keep replies grounded and professional.',
+    signature: 'Best regards,\nOwner'
+  };
+
+  const styleProfile = {
+    summary: 'Write clear replies.',
+    commonPhrases: ['Thanks for your email', 'Best regards'],
+    sentenceLength: 'moderate'
+  };
+
+  const concisePrompt = replyDraftGenerator.buildDraftPrompt(
+    email,
+    'Concise',
+    preferences,
+    styleProfile,
+    'Message 1: Sender asked for availability.'
+  );
+  const friendlyPrompt = replyDraftGenerator.buildDraftPrompt(
+    email,
+    'Friendly',
+    preferences,
+    styleProfile,
+    'Message 1: Sender asked for availability.'
+  );
+  const formalPrompt = replyDraftGenerator.buildDraftPrompt(
+    email,
+    'Formal',
+    preferences,
+    styleProfile,
+    'Message 1: Sender asked for availability.'
+  );
+
+  assert.match(concisePrompt, /Tone objective: Write a short, direct, professional reply\./);
+  assert.match(concisePrompt, /Keep the reply to 3 to 6 sentences/);
+
+  assert.match(friendlyPrompt, /Tone objective: Write a warm, natural, human reply\./);
+  assert.match(friendlyPrompt, /Sound approachable and positive/);
+
+  assert.match(formalPrompt, /Tone objective: Write a polished, respectful, businesslike reply\./);
+  assert.match(formalPrompt, /Avoid casual phrases, slang, or overly warm phrasing\./);
+
+  assert.notEqual(concisePrompt, friendlyPrompt);
+  assert.notEqual(concisePrompt, formalPrompt);
+  assert.notEqual(friendlyPrompt, formalPrompt);
 });
 
 test('settings page includes Google OAuth client credential inputs', () => {
