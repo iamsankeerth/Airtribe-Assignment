@@ -185,6 +185,43 @@ test('OAuth redirect URI follows runtime configuration', () => {
   assert.equal(gmailService.getRedirectUri(), 'https://example.com/oauth/google/callback');
 });
 
+test('settings page includes Google OAuth client credential inputs', () => {
+  const indexHtml = fs.readFileSync(path.join(repoRoot, 'public', 'index.html'), 'utf8');
+
+  assert.match(indexHtml, /id="clientId"/);
+  assert.match(indexHtml, /id="clientSecret"/);
+});
+
+test('config save route persists Google OAuth credentials for auth URL generation', async () => {
+  process.env.GMAIL_REDIRECT_URI = 'https://airtribe-assignment.onrender.com/api/auth/callback';
+
+  const { server, baseUrl } = await withServer(createApp());
+
+  try {
+    const saveResponse = await fetch(`${baseUrl}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: 'render-client-id.apps.googleusercontent.com',
+        clientSecret: 'render-client-secret'
+      })
+    });
+    const savePayload = await saveResponse.json();
+
+    assert.equal(saveResponse.status, 200);
+    assert.equal(savePayload.success, true);
+
+    const authUrlResponse = await fetch(`${baseUrl}/api/auth/url`);
+    const authPayload = await authUrlResponse.json();
+
+    assert.equal(authUrlResponse.status, 200);
+    assert.match(authPayload.url, /^https:\/\/accounts\.google\.com\//);
+    assert.match(authPayload.url, /redirect_uri=https%3A%2F%2Fairtribe-assignment\.onrender\.com%2Fapi%2Fauth%2Fcallback/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('approved sends persist a final sent-email record', async () => {
   const credentials = db.get('credentials');
   credentials.userEmail = 'owner@example.com';

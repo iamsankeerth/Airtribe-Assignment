@@ -276,9 +276,19 @@
           <!-- AI Model Provider & Keys Configuration Card -->
           <div class="settings-card">
             <h2>AI Model Provider & Keys</h2>
-            <p class="card-subtitle">Select your active AI text generation provider and save secure API keys.</p>
+            <p class="card-subtitle">Save Google OAuth client credentials and your active AI provider keys for live Gmail drafting.</p>
 
             <form id="aiConfigForm" class="settings-form">
+              <div class="form-group">
+                <label for="clientId">Google OAuth Client ID</label>
+                <input type="text" id="clientId" class="form-input" placeholder="Enter your Google OAuth Client ID">
+              </div>
+
+              <div class="form-group">
+                <label for="clientSecret">Google OAuth Client Secret</label>
+                <input type="password" id="clientSecret" class="form-input" placeholder="Enter your Google OAuth Client Secret">
+              </div>
+
               <div class="form-group">
                 <label for="aiProvider">Active AI Provider</label>
                 <select id="aiProvider" class="form-select">

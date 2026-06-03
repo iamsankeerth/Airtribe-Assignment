@@ -343,6 +343,8 @@ export function createDashboardSession() {
 
   async function saveAiConfig() {
     const payload = {
+      clientId: document.getElementById('clientId').value,
+      clientSecret: document.getElementById('clientSecret').value,
       aiProvider: document.getElementById('aiProvider').value,
       geminiApiKey: document.getElementById('geminiApiKey').value,
       openaiApiKey: document.getElementById('openaiApiKey').value,
@@ -367,7 +369,7 @@ export function createDashboardSession() {
       const data = await apiClient.getAuthUrl();
       window.location.href = data.url;
     } catch (err) {
-      showToast('Failed to construct Google OAuth2 redirection link', 'error');
+      showToast(err.message || 'Failed to construct Google OAuth2 redirection link', 'error');
     }
   }
 
