@@ -4,21 +4,23 @@ const cryptoUtils = require('../utils/crypto');
 
 const DB_PATH = path.join(__dirname, '..', '..', 'data', 'db.json');
 
+const DEFAULT_PREFERENCES = {
+  defaultTone: 'Concise',
+  signature: 'Sent via Draftly AI Assistant',
+  customInstructions: 'Be professional, helpful, and concise. Avoid jargon. Address the sender by their first name.',
+  styleProfile: {
+    toneDistribution: { formal: 35, friendly: 45, concise: 20 },
+    sentenceLength: 'moderate (avg. 14 words)',
+    signatureStyle: 'Standard professional',
+    commonPhrases: ['Hope this finds you well', 'Let me know what works', 'Cheers'],
+    analysisTimestamp: null,
+    summary: 'Learned profile not yet computed. Click "Analyze Sent Emails" in Settings to scan your past writing patterns.'
+  }
+};
+
 // Default initial state for a pristine installation
 const DEFAULTS = {
-  preferences: {
-    defaultTone: 'Concise',
-    signature: 'Sent via Draftly AI Assistant',
-    customInstructions: 'Be professional, helpful, and concise. Avoid jargon. Address the sender by their first name.',
-    styleProfile: {
-      toneDistribution: { formal: 35, friendly: 45, concise: 20 },
-      sentenceLength: 'moderate (avg. 14 words)',
-      signatureStyle: 'Standard professional',
-      commonPhrases: ['Hope this finds you well', 'Let me know what works', 'Cheers'],
-      analysisTimestamp: null,
-      summary: 'Learned profile not yet computed. Click "Analyze Sent Emails" in Settings to scan your past writing patterns.'
-    }
-  },
+  preferences: null,
   credentials: {
     clientId: '',
     clientSecret: '',
@@ -34,6 +36,7 @@ const DEFAULTS = {
   },
   emails: [],
   drafts: [],
+  sentEmails: [],
   logs: [
     {
       id: 'log-1',
@@ -124,6 +127,26 @@ class JSONDatabase {
     return changed;
   }
 
+  reconcileLegacyPreferences() {
+    const preferences = this.data.preferences;
+    if (!preferences) {
+      this.data.preferences = cryptoUtils.encrypt(JSON.stringify(DEFAULT_PREFERENCES));
+      return true;
+    }
+
+    if (typeof preferences === 'object') {
+      this.data.preferences = cryptoUtils.encrypt(JSON.stringify(preferences));
+      return true;
+    }
+
+    if (typeof preferences !== 'string') {
+      this.data.preferences = cryptoUtils.encrypt(JSON.stringify(DEFAULT_PREFERENCES));
+      return true;
+    }
+
+    return false;
+  }
+
   init() {
     if (this.isLoaded) return;
 
@@ -146,6 +169,7 @@ class JSONDatabase {
         this.reconcileGoogleOAuthCredentials();
         this.reconcileLegacyDraftSignatures();
         this.reconcileLegacyEmailFolders();
+        this.reconcileLegacyPreferences();
         if (this.data.credentials && 'mode' in this.data.credentials) {
           delete this.data.credentials.mode;
         }
@@ -162,6 +186,7 @@ class JSONDatabase {
 
   resetToDefaults() {
     this.data = JSON.parse(JSON.stringify(DEFAULTS));
+    this.data.preferences = cryptoUtils.encrypt(JSON.stringify(DEFAULT_PREFERENCES));
     this.reconcileGoogleOAuthCredentials();
     this.saveSync();
     this.isLoaded = true;
@@ -291,14 +316,41 @@ class JSONDatabase {
   async saveEncryptedCredentials(creds) {
     this.init();
     const secureCreds = { ...creds };
-    if (secureCreds.accessToken && !secureCreds.accessToken.includes(':')) {
+    if (secureCreds.accessToken && !cryptoUtils.isEncryptedValue(secureCreds.accessToken)) {
       secureCreds.accessToken = cryptoUtils.encrypt(secureCreds.accessToken);
     }
-    if (secureCreds.refreshToken && !secureCreds.refreshToken.includes(':')) {
+    if (secureCreds.refreshToken && !cryptoUtils.isEncryptedValue(secureCreds.refreshToken)) {
       secureCreds.refreshToken = cryptoUtils.encrypt(secureCreds.refreshToken);
     }
     this.data.credentials = secureCreds;
     await this.save();
+  }
+
+  getDecryptedPreferences() {
+    this.init();
+    const stored = this.data.preferences;
+
+    if (!stored) {
+      return JSON.parse(JSON.stringify(DEFAULT_PREFERENCES));
+    }
+
+    if (typeof stored === 'object') {
+      return JSON.parse(JSON.stringify(stored));
+    }
+
+    try {
+      return JSON.parse(cryptoUtils.decrypt(stored));
+    } catch (err) {
+      console.error('Failed to decrypt preferences, using defaults:', err.message);
+      return JSON.parse(JSON.stringify(DEFAULT_PREFERENCES));
+    }
+  }
+
+  async saveEncryptedPreferences(preferences) {
+    this.init();
+    this.data.preferences = cryptoUtils.encrypt(JSON.stringify(preferences));
+    await this.save();
+    return this.getDecryptedPreferences();
   }
 
   // Audit Logger Helper

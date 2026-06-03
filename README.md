@@ -1,149 +1,261 @@
-# Draftly: AI-Powered Gmail Assistant & Writing Style Copilot
+# Draftly: Gmail AI Reply Agent
 
-Draftly is a production-ready, highly secure email writing assistant that synchronizes live inbox messages, drafts contextual reply proposals using advanced Gemini LLMs, automatically compiles customized writing style profiles from your sent emails, and manages dispatch operations via an asynchronous send queue with backoffs.
+Draftly is a Gmail reply assistant built for the Airtribe assignment brief. It connects to Gmail with OAuth2, syncs recent mailbox data, drafts grounded replies for incoming emails, lets the user review/edit/approve those drafts, sends approved replies back through Gmail, and learns a lightweight writing style profile from sent mail.
 
-Operating strictly in **Live Mode** bound to `sankeerthmvsr@gmail.com`, Draftly is designed under the minimal, sparkles-free **"Ventriloc"** slate-and-canvas design language.
+The app is intentionally inbox-first:
+- `Inbox` and `Spam` can surface reply drafts.
+- `Sent` is visible for context, but reply drafting is blocked there because the assignment is about replying to received mail.
 
----
+## What The App Does
 
-## 🏛️ Architectural Seam & Design Decisions
+- Connects a Gmail account with OAuth2.
+- Syncs recent `inbox`, `spam`, and `sent` messages from Gmail.
+- Generates AI-assisted reply drafts for incoming emails using thread context, user preferences, and tone selection.
+- Supports `Concise`, `Friendly`, `Formal`, and `Custom` tone modes.
+- Lets the user edit, reject, or approve a draft before sending.
+- Sends only approved drafts through Gmail with reply-thread headers.
+- Retries transient send failures with exponential backoff.
+- Marks fatal auth failures, disconnects the session, and surfaces logs.
+- Learns a style profile from sent mail to influence future drafts.
+- Encrypts stored OAuth tokens and user preferences at rest.
 
-Draftly is built using a **High-Leverage Hybrid** architecture. It implements deep system boundaries, strong domain locality, and high-leverage caller entry points to decouple controllers from database internals and provider specifics.
+## Current Architecture
 
-```mermaid
-graph TD
-    User([User Assessor]) <-->|Interacts| Dashboard[Premium Web Dashboard]
-    Dashboard <-->|RESTful APIs| ExpressServer[api.js Router]
-    
-    subgraph DraftlySeam [Unified Draftly Seam Module]
-        ExpressServer <-->|Single Facade Interface| Seam[Draftly Service Facade]
-        Seam -->|inbox| InboxMgr[Inbox Manager]
-        Seam -->|connectivity| ConnMgr[Connectivity Manager]
-        Seam -->|profile| ProfileMgr[Profile Manager]
-    end
-    
-    subgraph DataRepositories [Deep Repository Layer]
-        InboxMgr <-->|Clean queries| InboxRepo[InboxRepository]
-        ConnMgr <-->|Retrieve credentials| DB[JSON Database - db.js]
-        ProfileMgr <-->|Save preferences| DB
-        InboxRepo <-->|Abstract CRUD & Sorting| DB
-        OutboxRepo <-->|Abstract UUID & Timestamps| DB
-    end
-    
-    InboxMgr <-->|Live Synchronizations| GmailService[Gmail Service - gmail.js]
-    InboxMgr <-->|Generate Replies| AIService[AI Writer Service - ai.js]
-    ProfileMgr <-->|Linguistic Stylistics| StyleLearner[Style Learner - styleLearner.js]
-    
-    subgraph AsynchronousPipeline [Send Queue Daemon]
-        InboxMgr -->|Enqueue| Queue[Send Queue - queue.js]
-        Queue <-->|Locked Transaction| OutboxRepo[OutboxRepository]
-        Queue -->|Dispatches Reply| GmailService
-    end
-```
+The codebase is split into backend lifecycle modules, provider-backed writing intelligence, and a browser-native frontend session layer.
 
-### 1. Unified Deep Interface Seam (`Draftly` Facade)
-*   **The Design**: In [draftly.js](src/services/draftly.js), we introduced a single, high-leverage service facade that encapsulates all operations under three cohesive namespaces: `inbox`, `connectivity`, and `profile`.
-*   **The Leverage**: Rather than having the API controllers manage credentials, select between providers, or chain data updates manually, controllers invoke high-level intents (e.g., `draftly.inbox.approveDraft(id)`).
-*   **The Locality**: The router in [api.js](src/routes/api.js) is kept lightweight and clean, with raw imports reduced by 80%.
+### Backend modules
 
-### 2. Encapsulated Model Repositories
-*   **The Design**: Modeled in [repositories.js](src/database/repositories.js), the database is wrapped by two concrete repositories: `InboxRepository` and `OutboxRepository`.
-*   **The Locality**: All collection-specific business rules—such as generating random UUIDs for drafts, auto-injecting ISO UTC timestamps, validating incoming schemas, and sorting inbox messages chronologically descending—have been centralized inside the repositories. Callers write zero boilerplates.
+- `src/modules/replyDraftLifecycle.js`
+  Owns reply draft creation, regeneration, editing, approval, rejection, queue processing, retry/backoff, sent-mail persistence, and send-state transitions.
+- `src/modules/writingIntelligence/`
+  Owns reply generation and style-profile learning. Provider selection and fallback logic are private to this module.
+- `src/modules/inboxMailbox.js`
+  Owns mailbox listing and sync orchestration.
+- `src/modules/channelConnectivity.js`
+  Owns Gmail/OAuth-facing configuration and status.
+- `src/modules/profilePreferences.js`
+  Owns decrypted user preference reads/writes.
 
-### 3. Asynchronous Dispatch Queue with Backoff
-*   **Idempotency Locks**: In [queue.js](src/services/queue.js), an in-memory `activeLocks` Set tracks active draft dispatches. If concurrent triggers occur, duplicate sends are rejected to guarantee idempotency.
-*   **Exponential Backoff Retry**: When a network timeout or transient dispatch error is encountered, the scheduler applies an exponential backoff formula ($Math.pow(2, retryCount - 1) * 5$ seconds) up to a limit of 5 retries.
-*   **Fatal Alert Banner**: If a terminal OAuth2 token expiration is detected, the queue halts execution, flags `isConnected = false`, and issues a `USER ALERT` which triggers a prominent connection warning banner on the dashboard.
+### Adapters and storage
 
-### 4. AES-256-GCM Secure Encryption
-*   All sensitive credentials, including Google Cloud Client Secrets, Gmail Access/Refresh tokens, and Gemini API keys are encrypted at rest inside `data/db.json` using Node’s `crypto` module with authenticated **AES-256-GCM** encryption.
+- `src/services/gmail.js`
+  Gmail OAuth, sync, parse, and send adapter.
+- `src/database/db.js`
+  JSON persistence layer with encrypted credentials/preferences helpers.
+- `src/database/repositories.js`
+  Repository layer for inbox emails, reply drafts, and persisted sent emails.
 
----
+### Frontend
 
-## 🎨 Premium User Experience (UX) Enhancements
+- `public/js/session/dashboardSession.js`
+  Session state, polling, draft actions, and orchestration.
+- `public/js/session/apiClient.js`
+  Fetch wrappers for the REST API.
+- `public/js/views/`
+  Render-only view modules for email list, email detail, draft editor, settings, logs, and style profile.
 
-Draftly features curated visual layout improvements that guarantee a state-of-the-art interactive experience:
+## Security Notes
 
-1.  **Programmatic Iframe Sandboxing (Full Email Rendering)**:
-    *   To display rich newsletter layouts (like LinkedIn Job Alerts) without clipping or forcing multiple inner scrollbars, Draftly programmatically adjusts the iframe's height to match its scroll content dynamically (`Math.max(body.scrollHeight, html.scrollHeight)`). 
-    *   The iframe is securely sandboxed (`allow-same-origin`) and text scrolling is disabled to let the entire email expand fully across the page.
-2.  **Smooth Suggestion Scrolling**:
-    *   Clicking **AI Suggestion** on any email automatically slides open the draft panel and triggers a smooth scrolling focus (`scrollWorkspaceToDraftEditor`) that centers the editor card perfectly at the bottom of the viewport.
-3.  **Expanded Textarea & Drag Handle**:
-    *   The draft writing canvas starts with a spacious `300px` height out-of-the-box.
-    *   Transition animations have been decoupled from the drag event to allow native, lag-free vertical resizing via the browser drag handle.
-4.  **High-Capacity Inbox**:
-    *   Synchronization is configured to fetch and render up to **50 recent unread emails** smoothly, letting the sidebar list expand naturally without custom container scroll clipping.
+- OAuth access and refresh tokens are encrypted at rest.
+- User preferences are encrypted at rest.
+- New encrypted values use authenticated `AES-256-GCM`.
+- Legacy `AES-256-CBC` token values remain readable through a compatibility decrypt path so existing local data does not break.
+- If `ENCRYPTION_KEY` is not set, Draftly generates a machine-local key file at `data/.draftly.key` for local development.
 
----
+## Setup
 
-## 🔌 RESTful API Reference
+### 1. Install dependencies
 
-All backend actions are exposed as RESTful endpoints under the base URL `http://localhost:5000/api`.
-
-### Connectivity & Configuration
-*   `GET /api/config`
-    *   **Description**: Retrieves connection status and redacted, safe configuration properties (no raw secrets exposed).
-    *   **Response**: `{ clientId: "...xxxx", clientSecret: "********", geminiApiKey: "********", isConnected: true, userEmail: "sankeerthmvsr@gmail.com" }`
-*   `POST /api/config`
-    *   **Description**: Securely encrypts and saves client credentials or Gemini API key overrides.
-    *   **Body**: `{ clientId: "string", clientSecret: "string", geminiApiKey: "string" }`
-*   `GET /api/auth/url`
-    *   **Description**: Generates secure Google OAuth2 Consent URL.
-*   `GET /api/auth/callback`
-    *   **Description**: Callback exchange endpoint that receives authorization codes and requests Gmail API credentials.
-*   `POST /api/auth/logout`
-    *   **Description**: Revokes tokens with Google servers, clears credentials, and disconnects the account.
-
-### Inbox Emails & Reply Drafts
-*   `GET /api/emails`
-    *   **Description**: Instant read-only database query returning all fetched inbox emails sorted descending. (Fast execution under 15ms).
-*   `POST /api/emails/sync`
-    *   **Description**: Initiates live Gmail API sync, stores up to 50 messages, and launches background pre-generation of drafts.
-*   `GET /api/drafts`
-    *   **Description**: Retrieves all reply drafts.
-*   `GET /api/drafts/:emailId`
-    *   **Description**: Fetches or initializes a Suggested reply draft using the user's default tone.
-*   `POST /api/drafts/:emailId/regenerate`
-    *   **Description**: Instructs the AI service to rewrite the draft for an email under a new tone.
-    *   **Body**: `{ tone: "Concise | Friendly | Formal | Custom" }`
-*   `PUT /api/drafts/:id`
-    *   **Description**: Updates a draft's text content and marks its status as `Edited`.
-    *   **Body**: `{ content: "string" }`
-*   `POST /api/drafts/:id/approve`
-    *   **Description**: Approves a draft, moves status to `Approved`, and queues it for transmission.
-*   `POST /api/drafts/:id/reject`
-    *   **Description**: Rejects and archives the draft.
-
-### Style Profile & Observability Logs
-*   `GET /api/style/profile`
-    *   **Description**: Retrieves the active semantic profile (tone distribution, phrase patterns).
-*   `POST /api/style/learn`
-    *   **Description**: Syncs Gmail outbox messages and analyzes sent history to compile user writing style profiles.
-*   `GET /api/preferences`
-    *   **Description**: Retrieves active tone, signature, and instructions preferences.
-*   `POST /api/preferences`
-    *   **Description**: Saves default tone, custom instructions, or signature.
-*   `GET /api/logs`
-    *   **Description**: Retrieves the latest 100 system audit logs.
-
----
-
-## ⚡ Execution & Verification
-
-### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Start the Backend Server
+### 2. Configure environment variables
+
+Create a local `.env` file if you want to override defaults:
+
+```env
+PORT=5000
+ENCRYPTION_KEY=replace-with-a-long-random-secret
+GMAIL_REDIRECT_URI=http://localhost:5000/api/auth/callback
+```
+
+Notes:
+- `PORT` defaults to `5000`.
+- `GMAIL_REDIRECT_URI` defaults to `http://localhost:${PORT}/api/auth/callback`.
+- `ENCRYPTION_KEY` is recommended for stable encrypted storage across machines/environments.
+
+### 3. Configure Google OAuth
+
+You need a Google Cloud OAuth client with Gmail scopes enabled. Draftly expects:
+
+- Gmail read access
+- Gmail send access
+- user email identity access
+
+You can either:
+- save Google client credentials through the dashboard settings, or
+- keep a downloaded Google client secret JSON file in the project root for local reconciliation during development.
+
+### 4. Start the app
+
 ```bash
 npm start
 ```
-*The server starts listening on `http://localhost:5000` and initializes the background send queue.*
 
-### 3. Run Verification Tests
-A comprehensive validation suite is included to check all primary API seams:
+Then open:
+
+```text
+http://localhost:5000
+```
+
+## REST API
+
+All endpoints are mounted under `/api`.
+
+### Connectivity and configuration
+
+- `GET /api/config`
+  Returns safe config/status fields for the dashboard.
+- `POST /api/config`
+  Saves client credentials and AI provider configuration.
+- `GET /api/auth/url`
+  Returns the Google OAuth consent URL.
+- `GET /api/auth/callback`
+  Exchanges the OAuth code for Gmail tokens and redirects to `/`.
+- `POST /api/auth/logout`
+  Revokes/clears Gmail session tokens.
+
+### Mailbox and drafts
+
+- `GET /api/emails?folder=inbox|sent|spam|all`
+  Returns synced mailbox items for the selected folder.
+- `POST /api/emails/sync`
+  Pulls recent Gmail mailbox data into local storage.
+- `GET /api/drafts`
+  Returns all reply drafts.
+- `GET /api/drafts/:emailId`
+  Gets or creates a draft for an incoming email.
+- `POST /api/drafts/:emailId/regenerate`
+  Regenerates a draft using a different tone.
+- `PUT /api/drafts/:id`
+  Saves manual draft edits.
+- `POST /api/drafts/:id/approve`
+  Marks a draft approved and enqueues it for sending.
+- `POST /api/drafts/:id/reject`
+  Rejects a draft.
+
+### Style profile and preferences
+
+- `GET /api/style/profile`
+  Returns the current learned writing style profile.
+- `POST /api/style/learn`
+  Analyzes recent sent mail and stores an updated style profile.
+- `GET /api/preferences`
+  Returns decrypted user writing preferences.
+- `POST /api/preferences`
+  Saves user writing preferences.
+
+### Observability
+
+- `GET /api/logs`
+  Returns recent audit/system logs.
+
+## Draft Lifecycle
+
+Reply drafts move through these states:
+
+- `Suggested`
+- `Edited`
+- `Approved`
+- `Sending`
+- `Retrying`
+- `Sent`
+- `Failed`
+- `Rejected`
+
+Behavior:
+- Drafts are created only for incoming emails.
+- `no-reply` senders are blocked.
+- `sent` messages are blocked.
+- Approved drafts are picked up by the send scheduler.
+- Transient send failures retry with exponential backoff.
+- Persistent auth failures mark the Gmail channel disconnected.
+
+## Assignment Alignment
+
+Implemented:
+- Gmail OAuth2 connect/disconnect
+- fetch recent Gmail messages with sender, recipient, subject, body, timestamp, and thread ID
+- AI reply generation for incoming mail
+- tone switching
+- thread-aware replies
+- style learning from sent mail
+- review/edit/approve/reject flow
+- approved-only sending
+- audit logging
+- retry and auth-failure handling
+- encrypted token storage
+- encrypted user preference storage
+- REST API coverage
+
+Intentionally out of scope in the product behavior:
+- auto-sending without approval
+- reply drafting for `Sent` mail
+
+## Tests
+
+Run the automated test suite:
+
 ```bash
-node scratch/test.js
+npm test
+```
+
+The current tests cover:
+- encrypted preference persistence
+- sent-mail drafting guard
+- draft route guard for sent mail
+- runtime-safe Gmail redirect URI behavior
+- final sent-email record persistence
+- duplicate approval idempotency
+- draft regeneration clearing old send-request identity
+- queue-wide quota cool-off after repeated rate-limit failures
+- conservative heuristic fallback behavior
+
+## Known Limitations
+
+- Storage is JSON-backed for simplicity instead of a production database.
+- The app syncs a recent mailbox slice rather than the full Gmail history.
+- Style learning currently routes through the Gemini provider path when an API key is available; fallback is heuristic.
+- There is no background job persistence beyond local JSON state.
+
+## Quota And Idempotency
+
+- Gmail API calls pass through a local quota guard that spaces out sync, analysis, send, and auth requests.
+- Send requests carry a stable request key derived from the draft content and thread metadata.
+- Drafts keep internal dispatch metadata such as `dispatchState`, `sendRequestKey`, `approvedAt`, and `claimedAt` while preserving the same public draft lifecycle statuses.
+- Approved drafts are claimed before dispatch so repeated approvals or queue restarts do not create duplicate Gmail sends for the same request key.
+- Editing or regenerating a draft clears the prior send request identity so a newly approved version becomes a new logical send request.
+- If Gmail returns quota-related errors repeatedly, the send queue enters a temporary cool-off window and defers more dispatch attempts instead of hammering the API.
+- The idempotency guarantee is best-effort at the application layer: if Gmail accepts a send and the process crashes before the sent record is persisted, exact once-only delivery cannot be guaranteed.
+
+## Project Structure
+
+```text
+public/
+  index.html
+  js/
+    session/
+    shared/
+    views/
+src/
+  database/
+  modules/
+    shared/
+    writingIntelligence/
+  routes/
+  services/
+  utils/
+server.js
+tests/
 ```

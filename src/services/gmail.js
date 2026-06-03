@@ -1,20 +1,32 @@
 const { google } = require('googleapis');
-const db = require('../database/db');
+const gmailQuota = require('../modules/gmailQuota');
+const {
+  credentialsRepo,
+  auditLogRepo,
+  inboxRepo,
+  outboxRepo
+} = require('../database/repositories');
 
 class GmailService {
+  getRedirectUri() {
+    if (process.env.GMAIL_REDIRECT_URI) {
+      return process.env.GMAIL_REDIRECT_URI;
+    }
+
+    const port = process.env.PORT || 5000;
+    return `http://localhost:${port}/api/auth/callback`;
+  }
+
   getOAuth2Client() {
-    const creds = db.getDecryptedCredentials();
+    const creds = credentialsRepo.getDecrypted();
     if (!creds.clientId || !creds.clientSecret) {
       throw new Error('Google OAuth2 Client ID or Client Secret is not configured in settings.');
     }
-    
-    // Redirect URI points to our server's OAuth2 callback handler
-    const redirectUri = 'http://localhost:5000/api/auth/callback';
-    
+
     return new google.auth.OAuth2(
       creds.clientId,
       creds.clientSecret,
-      redirectUri
+      this.getRedirectUri()
     );
   }
 
@@ -33,16 +45,16 @@ class GmailService {
 
   async handleCallback(code) {
     const oauth2Client = this.getOAuth2Client();
-    await db.log('Gmail', 'Info', 'Exchanging OAuth2 code for tokens...');
-    
-    const { tokens } = await oauth2Client.getToken(code);
+    await auditLogRepo.log('Gmail', 'Info', 'Exchanging OAuth2 code for tokens...');
+
+    const { tokens } = await gmailQuota.run('auth', 'exchange OAuth2 code for tokens', () => oauth2Client.getToken(code));
     oauth2Client.setCredentials(tokens);
 
     // Fetch user profile email
     const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
-    const userInfo = await oauth2.userinfo.get();
+    const userInfo = await gmailQuota.run('auth', 'fetch Gmail user profile', () => oauth2.userinfo.get());
     
-    const creds = db.get('credentials');
+    const creds = credentialsRepo.get();
     creds.accessToken = tokens.access_token;
     if (tokens.refresh_token) {
       creds.refreshToken = tokens.refresh_token;
@@ -52,17 +64,17 @@ class GmailService {
     creds.userEmail = userInfo.data.email || 'connected.user@gmail.com';
 
     // Clear cached email state so the dashboard reflects the connected account
-    db.set('emails', []);
-    db.set('drafts', []);
+    inboxRepo.clearAll();
+    outboxRepo.clearAll();
 
-    await db.saveEncryptedCredentials(creds);
-    await db.log('Gmail', 'Info', `Successfully connected Gmail account (${creds.userEmail}). Cleared cached emails and drafts.`);
+    await credentialsRepo.save(creds);
+    await auditLogRepo.log('Gmail', 'Info', `Successfully connected Gmail account (${creds.userEmail}). Cleared cached emails and drafts.`);
     return creds;
   }
 
   async getAuthenticatedClient() {
     const oauth2Client = this.getOAuth2Client();
-    const creds = db.getDecryptedCredentials();
+    const creds = credentialsRepo.getDecrypted();
 
     if (!creds.accessToken) {
       throw new Error('Gmail account is not authenticated.');
@@ -77,21 +89,21 @@ class GmailService {
     // Check if token is expired or expiring in 5 mins, if so refresh it
     if (Date.now() > (creds.tokenExpiry - 300000) && creds.refreshToken) {
       try {
-        await db.log('Gmail', 'Info', 'OAuth2 access token is expiring. Triggering auto-refresh...');
-        const { credentials } = await oauth2Client.refreshAccessToken();
+        await auditLogRepo.log('Gmail', 'Info', 'OAuth2 access token is expiring. Triggering auto-refresh...');
+        const { credentials } = await gmailQuota.run('auth', 'refresh OAuth2 access token', () => oauth2Client.refreshAccessToken());
         
-        const currentCreds = db.get('credentials');
+        const currentCreds = credentialsRepo.get();
         currentCreds.accessToken = credentials.access_token;
         currentCreds.tokenExpiry = credentials.expiry_date;
         if (credentials.refresh_token) {
           currentCreds.refreshToken = credentials.refresh_token;
         }
-        await db.saveEncryptedCredentials(currentCreds);
+        await credentialsRepo.save(currentCreds);
         
         oauth2Client.setCredentials(credentials);
-        await db.log('Gmail', 'Info', 'OAuth2 access token successfully refreshed.');
+        await auditLogRepo.log('Gmail', 'Info', 'OAuth2 access token successfully refreshed.');
       } catch (err) {
-        await db.log('Gmail', 'Error', 'Failed to refresh OAuth2 token automatically: ' + err.message);
+        await auditLogRepo.log('Gmail', 'Error', 'Failed to refresh OAuth2 token automatically: ' + err.message);
         throw err;
       }
     }
@@ -132,48 +144,31 @@ class GmailService {
     return '';
   }
 
-  async syncEmails() {
-    await db.log('Gmail', 'Info', 'Syncing live Gmail inbox, sent, and spam folders...');
+  async fetchMailboxFolders(folderConfigs) {
+    await auditLogRepo.log('Gmail', 'Info', 'Fetching live Gmail folders for mailbox sync.');
     const authClient = await this.getAuthenticatedClient();
     const gmail = google.gmail({ version: 'v1', auth: authClient });
 
-    const foldersToSync = [
-      { name: 'inbox', query: 'is:inbox', max: 20 },
-      { name: 'sent', query: 'from:me', max: 15 },
-      { name: 'spam', query: 'is:spam', max: 10 }
-    ];
+    const fetchedEmails = [];
 
-    const syncedEmails = [];
-
-    for (const folderConfig of foldersToSync) {
+    for (const folderConfig of folderConfigs) {
       try {
-        const res = await gmail.users.messages.list({
+        const res = await gmailQuota.run('sync', `list messages for folder "${folderConfig.name}"`, () => gmail.users.messages.list({
           userId: 'me',
           q: folderConfig.query,
           maxResults: folderConfig.max
-        });
+        }));
 
         const messages = res.data.messages || [];
-        await db.log('Gmail', 'Info', `Syncing folder "${folderConfig.name}" - Found ${messages.length} messages.`);
+        await auditLogRepo.log('Gmail', 'Info', `Fetching folder "${folderConfig.name}" - Found ${messages.length} messages.`);
 
         for (const msg of messages) {
-          // Check if we already have this email parsed and stored
-          let existing = db.findById('emails', msg.id);
-          if (existing) {
-            // Reconcile folder tag if needed
-            if (existing.folder !== folderConfig.name) {
-              existing = await db.updateById('emails', msg.id, { folder: folderConfig.name });
-            }
-            syncedEmails.push(existing);
-            continue;
-          }
-
           try {
-            const detail = await gmail.users.messages.get({
+            const detail = await gmailQuota.run('sync', `fetch detail for message ${msg.id}`, () => gmail.users.messages.get({
               userId: 'me',
               id: msg.id,
               format: 'full'
-            });
+            }));
 
             const headers = detail.data.payload.headers;
             const subject = (headers.find(h => h.name.toLowerCase() === 'subject') || {}).value || 'No Subject';
@@ -196,19 +191,59 @@ class GmailService {
               folder: folderConfig.name
             };
 
-            await db.insert('emails', parsedEmail);
-            await db.log('Gmail', 'Info', `Successfully synced new email in "${folderConfig.name}": "${subject}"`);
-            syncedEmails.push(parsedEmail);
+            fetchedEmails.push(parsedEmail);
           } catch (err) {
-            await db.log('Gmail', 'Error', `Failed to fetch detail for msg ID ${msg.id}: ${err.message}`);
+            await auditLogRepo.log('Gmail', 'Error', `Failed to fetch detail for msg ID ${msg.id}: ${err.message}`);
           }
         }
       } catch (err) {
-        await db.log('Gmail', 'Error', `Failed to sync folder "${folderConfig.name}": ${err.message}`);
+        await auditLogRepo.log('Gmail', 'Error', `Failed to fetch folder "${folderConfig.name}": ${err.message}`);
       }
     }
 
-    return db.findAll('emails');
+    return fetchedEmails;
+  }
+
+  async fetchSentBodies(maxResults = 10) {
+    const authClient = await this.getAuthenticatedClient();
+    const gmail = google.gmail({ version: 'v1', auth: authClient });
+
+    await auditLogRepo.log('Gmail', 'Info', `Fetching user's last ${maxResults} sent emails...`);
+
+    const listRes = await gmailQuota.run('analysis', 'list sent mail corpus', () => gmail.users.messages.list({
+      userId: 'me',
+      q: 'from:me',
+      maxResults
+    }));
+
+    const messages = listRes.data.messages || [];
+    if (messages.length === 0) {
+      throw new Error('No sent emails found in Gmail outbox to analyze.');
+    }
+
+    const bodies = [];
+    for (const msg of messages) {
+      try {
+        const detail = await gmailQuota.run('analysis', `fetch sent message ${msg.id}`, () => gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'full'
+        }));
+        const body = this.parseBody(detail.data.payload);
+        if (body && body.trim().length > 10) {
+          const rawBody = body.split('\nOn ')[0].split('-----Original Message-----')[0].trim();
+          bodies.push(rawBody);
+        }
+      } catch (err) {
+        await auditLogRepo.log('Gmail', 'Warning', `Skipping sent message ${msg.id}: ${err.message}`);
+      }
+    }
+
+    if (!bodies.length) {
+      throw new Error('Could not extract valid text bodies from sent emails.');
+    }
+
+    return bodies;
   }
 
   // Construct RFC 2822 raw message and base64url encode it
@@ -242,12 +277,12 @@ class GmailService {
       .replace(/=+$/, '');
   }
 
-  async sendReply(draftId, draftContent, threadId, originalSubject, senderEmail, originalMessageId = '') {
-    await db.log('Gmail', 'Info', `Preparing live SMTP transmission for thread: ${threadId}`);
+  async sendReply(draftContent, threadId, originalSubject, senderEmail, originalMessageId = '') {
+    await auditLogRepo.log('Gmail', 'Info', `Preparing live SMTP transmission for thread: ${threadId}`);
     
     const authClient = await this.getAuthenticatedClient();
     const gmail = google.gmail({ version: 'v1', auth: authClient });
-    const creds = db.get('credentials');
+    const creds = credentialsRepo.get();
 
     const replySubject = originalSubject.toLowerCase().startsWith('re:') ? originalSubject : `Re: ${originalSubject}`;
     
@@ -255,10 +290,10 @@ class GmailService {
     let messageId = originalMessageId;
     if (!messageId && threadId) {
       try {
-        const threadDetail = await gmail.users.threads.get({
+        const threadDetail = await gmailQuota.run('send', `fetch thread ${threadId} for reply headers`, () => gmail.users.threads.get({
           userId: 'me',
           id: threadId
-        });
+        }));
         const threadMsgs = threadDetail.data.messages || [];
         if (threadMsgs.length > 0) {
           const lastMsg = threadMsgs[threadMsgs.length - 1];
@@ -269,7 +304,7 @@ class GmailService {
           }
         }
       } catch (err) {
-        await db.log('Gmail', 'Warning', `Could not fetch original Message-ID for threading headers: ${err.message}`);
+        await auditLogRepo.log('Gmail', 'Warning', `Could not fetch original Message-ID for threading headers: ${err.message}`);
       }
     }
 
@@ -282,43 +317,39 @@ class GmailService {
       messageId
     );
 
-    await db.log('Gmail', 'Info', `Transmitting raw message to ${senderEmail}...`);
+    await auditLogRepo.log('Gmail', 'Info', `Transmitting raw message to ${senderEmail}...`);
 
-    const res = await gmail.users.messages.send({
+    const res = await gmailQuota.run('send', `send reply to ${senderEmail}`, () => gmail.users.messages.send({
       userId: 'me',
       requestBody: {
         raw,
         threadId // Attaches the message to the same thread in UI
       }
-    });
+    }));
 
-    await db.log('Gmail', 'Info', `Live message sent successfully. Response Message ID: ${res.data.id}`);
+    await auditLogRepo.log('Gmail', 'Info', `Live message sent successfully. Response Message ID: ${res.data.id}`);
 
     return {
       messageId: res.data.id,
       threadId: res.data.threadId,
+      replySubject,
       status: 'success'
     };
   }
 
   async revokeToken() {
-    const creds = db.getDecryptedCredentials();
+    const creds = credentialsRepo.getDecrypted();
     if (creds.accessToken) {
       try {
         const oauth2Client = this.getOAuth2Client();
-        await oauth2Client.revokeToken(creds.accessToken);
-        await db.log('Gmail', 'Info', 'Revoked Google OAuth2 credentials.');
+        await gmailQuota.run('auth', 'revoke OAuth2 token', () => oauth2Client.revokeToken(creds.accessToken));
+        await auditLogRepo.log('Gmail', 'Info', 'Revoked Google OAuth2 credentials.');
       } catch (err) {
-        await db.log('Gmail', 'Warning', `OAuth token revocation reported: ${err.message}. Clearing anyway.`);
+        await auditLogRepo.log('Gmail', 'Warning', `OAuth token revocation reported: ${err.message}. Clearing anyway.`);
       }
     }
-    
-    const currentCreds = db.get('credentials');
-    currentCreds.accessToken = '';
-    currentCreds.refreshToken = '';
-    currentCreds.tokenExpiry = 0;
-    currentCreds.isConnected = false;
-    await db.saveEncryptedCredentials(currentCreds);
+
+    await credentialsRepo.clearSession();
   }
 }
 

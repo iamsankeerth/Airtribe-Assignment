@@ -3,57 +3,69 @@ const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
 const db = require('./src/database/db');
-const queue = require('./src/services/queue');
+const sendQueue = require('./src/modules/sendQueue');
 const apiRouter = require('./src/routes/api');
 
 dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+function createApp() {
+  const app = express();
 
-// Enable CORS and parse JSON bodies
-app.use(cors());
-app.use(express.json());
+  app.use(cors());
+  app.use(express.json());
+  app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve static dashboard assets from public folder
-app.use(express.static(path.join(__dirname, 'public')));
+  db.init();
+  app.use('/api', apiRouter);
 
-// Initialize database
-db.init();
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  });
 
-// Start background Send Queue Scheduler
-queue.startScheduler();
+  return app;
+}
 
-// Mount REST API endpoints
-app.use('/api', apiRouter);
+function startServer(port = process.env.PORT || 5000) {
+  const app = createApp();
+  sendQueue.start();
 
-// Serve dashboard index for any unhandled routes (SPA compatibility)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+  const server = app.listen(port, () => {
+    console.log(`==================================================`);
+    console.log(`   DRAFTLY BACKEND IS RUNNING LOCALLY!`);
+    console.log(`   URL: http://localhost:${port}`);
+    console.log(`==================================================`);
+  });
 
-// Graceful shutdown handling
-const server = app.listen(PORT, () => {
-  console.log(`==================================================`);
-  console.log(`   DRAFTLY BACKEND IS RUNNING LOCALLY!`);
-  console.log(`   URL: http://localhost:${PORT}`);
-  console.log(`==================================================`);
-});
+  return { app, server };
+}
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received. Shutting down gracefully...');
-  queue.stopScheduler();
-  server.close(() => {
-    console.log('Express server closed.');
+function stopServer(server) {
+  sendQueue.stop();
+  if (server) {
+    server.close(() => {
+      console.log('Express server closed.');
+    });
+  }
+}
+
+if (require.main === module) {
+  const { server } = startServer();
+
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM signal received. Shutting down gracefully...');
+    stopServer(server);
     process.exit(0);
   });
-});
 
-process.on('SIGINT', () => {
-  console.log('SIGINT signal received. Shutting down gracefully...');
-  queue.stopScheduler();
-  server.close(() => {
-    console.log('Express server closed.');
+  process.on('SIGINT', () => {
+    console.log('SIGINT signal received. Shutting down gracefully...');
+    stopServer(server);
     process.exit(0);
   });
-});
+}
+
+module.exports = {
+  createApp,
+  startServer,
+  stopServer
+};
