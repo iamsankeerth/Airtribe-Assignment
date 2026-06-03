@@ -17,6 +17,7 @@ let writingIntelligence;
 let profilePreferences;
 let sentEmailRepo;
 let sendQueue;
+let inboxMailbox;
 let createApp;
 
 function backupFile(sourcePath, targetPath) {
@@ -60,6 +61,7 @@ test.before(() => {
   gmailService = require('../src/services/gmail');
   writingIntelligence = require('../src/modules/writingIntelligence');
   profilePreferences = require('../src/modules/profilePreferences');
+  inboxMailbox = require('../src/modules/inboxMailbox');
   ({ sentEmailRepo } = require('../src/database/repositories'));
   sendQueue = require('../src/modules/sendQueue');
   ({ createApp } = require('../server'));
@@ -75,6 +77,9 @@ test.after(() => {
 test.beforeEach(() => {
   if (sendQueue && sendQueue._resetForTests) {
     sendQueue._resetForTests();
+  }
+  if (inboxMailbox && inboxMailbox._resetForTests) {
+    inboxMailbox._resetForTests();
   }
   db.resetToDefaults();
   db.set('emails', []);
@@ -183,6 +188,30 @@ test('OAuth redirect URI follows runtime configuration', () => {
 
   process.env.GMAIL_REDIRECT_URI = 'https://example.com/oauth/google/callback';
   assert.equal(gmailService.getRedirectUri(), 'https://example.com/oauth/google/callback');
+});
+
+test('mailbox sync reuses the active sync pass instead of overlapping Gmail fetches', async () => {
+  const originalFetchMailboxFolders = gmailService.fetchMailboxFolders;
+  let fetchCallCount = 0;
+
+  gmailService.fetchMailboxFolders = async () => {
+    fetchCallCount += 1;
+    await new Promise(resolve => setTimeout(resolve, 25));
+    return [];
+  };
+
+  try {
+    const [first, second] = await Promise.all([
+      inboxMailbox.sync(),
+      inboxMailbox.sync()
+    ]);
+
+    assert.equal(fetchCallCount, 1);
+    assert.deepEqual(first, []);
+    assert.deepEqual(second, []);
+  } finally {
+    gmailService.fetchMailboxFolders = originalFetchMailboxFolders;
+  }
 });
 
 test('settings page includes Google OAuth client credential inputs', () => {

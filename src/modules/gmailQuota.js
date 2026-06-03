@@ -3,7 +3,7 @@ const { auditLogRepo } = require('../database/repositories');
 const CATEGORY_RULES = {
   auth: { minIntervalMs: 300, quotaBaseMs: 1000, quotaCapMs: 5 * 60 * 1000 },
   send: { minIntervalMs: 750, quotaBaseMs: 30000, quotaCapMs: 15 * 60 * 1000 },
-  sync: { minIntervalMs: 1500, quotaBaseMs: 60000, quotaCapMs: 20 * 60 * 1000 },
+  sync: { minIntervalMs: 250, quotaBaseMs: 60000, quotaCapMs: 20 * 60 * 1000 },
   analysis: { minIntervalMs: 2500, quotaBaseMs: 60000, quotaCapMs: 20 * 60 * 1000 },
   default: { minIntervalMs: 500, quotaBaseMs: 15000, quotaCapMs: 10 * 60 * 1000 }
 };
@@ -13,6 +13,14 @@ const lastRunAt = new Map();
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function formatDelay(waitMs) {
+  if (waitMs < 1000) {
+    return `${waitMs}ms`;
+  }
+
+  return `${(waitMs / 1000).toFixed(1)}s`;
 }
 
 function normalizeMessage(err) {
@@ -76,7 +84,7 @@ async function run(category, operation, fn) {
       await auditLogRepo.log(
         'Gmail',
         'Info',
-        `Quota guard delaying ${operation} by ${Math.ceil(waitMs / 1000)}s for ${category} traffic.`
+        `Quota guard delaying ${operation} by ${formatDelay(waitMs)} for ${category} traffic.`
       );
       await delay(waitMs);
     }

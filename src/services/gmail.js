@@ -150,6 +150,7 @@ class GmailService {
     const gmail = google.gmail({ version: 'v1', auth: authClient });
 
     const fetchedEmails = [];
+    const seenMessageIds = new Set();
 
     for (const folderConfig of folderConfigs) {
       try {
@@ -163,6 +164,12 @@ class GmailService {
         await auditLogRepo.log('Gmail', 'Info', `Fetching folder "${folderConfig.name}" - Found ${messages.length} messages.`);
 
         for (const msg of messages) {
+          if (seenMessageIds.has(msg.id)) {
+            await auditLogRepo.log('Gmail', 'Info', `Skipping duplicate Gmail message ${msg.id} during mailbox sync.`);
+            continue;
+          }
+          seenMessageIds.add(msg.id);
+
           try {
             const detail = await gmailQuota.run('sync', `fetch detail for message ${msg.id}`, () => gmail.users.messages.get({
               userId: 'me',
