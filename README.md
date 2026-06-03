@@ -109,6 +109,14 @@ Then open:
 http://localhost:5000
 ```
 
+## Live Deployment
+
+The project is also deployed on Render for the assignment demo:
+
+```text
+https://airtribe-assignment.onrender.com
+```
+
 ## REST API
 
 All endpoints are mounted under `/api`.
